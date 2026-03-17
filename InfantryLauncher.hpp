@@ -476,7 +476,7 @@ class InfantryLauncher {
             is_reverse_ = true;
           }
           target_trig_angle_ =
-              trig_angle_ + (is_reverse_ ? -2.0f * launcher::param::TRIG_STEP
+              trig_angle_ + (is_reverse_ ? -0.80f * launcher::param::TRIG_STEP
                                          : launcher::param::TRIG_STEP);
           is_reverse_ = !is_reverse_;
 
