@@ -118,13 +118,6 @@ class HeroLauncher {
     SET_FRICMODE_SAFE,
     SET_FRICMODE_READY,
   };
-
-  struct RefereeData {
-    float heat_limit;
-    float cooling_rate;
-    uint8_t level;
-  };
-
   struct HeatControl {
     float heat;          /* 现在热量水平 */
     float last_heat;     /* 之前的热量水平 */
@@ -316,10 +309,11 @@ class HeroLauncher {
 
   /* 外壳可直接写入的命令数据 */
   CMD::LauncherCMD launcher_cmd_;  // NOLINT
+  Referee::LauncherPack ref_data_{};
 
  private:
   LauncherParam param_;
-  RefereeData referee_data_;
+
   TrigMode trig_mode_ = TrigMode::SAFE;
 
   HeatControl heat_ctrl_;
@@ -593,11 +587,9 @@ class HeroLauncher {
    * @brief 热量限制计算
    */
   void HeatLimit() {
-    heat_ctrl_.heat_limit = referee_data_.heat_limit;
-    heat_ctrl_.heat_limit = 129.0f;  // for debug
+    heat_ctrl_.heat_limit = ref_data_.rs.shooter_heat_limit;
     heat_ctrl_.heat_increase = 100.0f;
-    heat_ctrl_.cooling_rate = referee_data_.cooling_rate;
-    heat_ctrl_.cooling_rate = 13.0f;  // for debug
+    heat_ctrl_.cooling_rate = ref_data_.rs.shooter_cooling_value;
     if (fired_ >= 1) {
       heat_ctrl_.heat += heat_ctrl_.heat_increase;
       fired_ = 0;
