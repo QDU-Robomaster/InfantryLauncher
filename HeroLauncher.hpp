@@ -300,7 +300,10 @@ class HeroLauncher {
 
     soft_start_finish = false;
   }
-
+  /**
+   * @brief 重置发射器状态
+   * @details 将所有发射相关的状态变量、标志位、时间戳和角度值重置到初始状态。
+   */
   void Reset() {
     first_loading_ = true;
     fire_flag_ = false;
