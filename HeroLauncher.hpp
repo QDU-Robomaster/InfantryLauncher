@@ -254,7 +254,7 @@ class HeroLauncher {
    */
   void LostCtrl() {
     // 重置所有发射相关的状态变量到初始模式
-    launcher_event_ = LauncherEvent::SET_FRICMODE_SAFE;
+    launcher_event_ = LauncherEvent::SET_FRICMODE_RELAX;
     trig_mode_ = TrigMode::RELAX;
 
     // 重置发射控制标志
