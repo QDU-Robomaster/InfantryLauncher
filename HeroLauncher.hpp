@@ -88,7 +88,7 @@ depends:
 #include "libxr_time.hpp"
 #include "pid.hpp"
 #include "timebase.hpp"
-#include "Referee.hpp"
+
 #ifdef DEBUG
 #include "DebugCore.hpp"
 #include "ramfs.hpp"
@@ -101,10 +101,9 @@ depends:
  */
 class HeroLauncher {
  public:
-  static constexpr float TRIG_ZERO_ANGLE_OFFSET = 0.55f;
+  static constexpr float TRIG_ZERO_ANGLE_OFFSET = 0.90f;
   static constexpr float TRIG_LOADING_ANGLE_STEP =
       static_cast<float>(M_2PI) / 1000.0f;
-  static constexpr float M3508_TORQUE_CONSTANT = 0.3f;
 
   enum class TrigMode : uint8_t {
     RELAX = 0,
@@ -343,6 +342,7 @@ class HeroLauncher {
   /* 外壳可直接写入的命令数据 */
   CMD::LauncherCMD launcher_cmd_;  // NOLINT
   Referee::LauncherPack ref_data_{};
+
  private:
   LauncherParam param_;
 
@@ -608,20 +608,23 @@ class HeroLauncher {
     }
     motor_trig_->Control(cmd_trig_);
   }
+  
+    /**
+   * @brief 摩擦轮软启动控制
+   * @details 在摩擦轮启动初期限制 PID 输出，防止电流冲击；
+   *          当实际转速达到设定值后解除输出限制。
+   */
   void SoftStart() {
     if (!soft_start_finish_) {
-      // 未达到目标速度前，保持小输出限制（缓启动）
       for (LibXR::PID<float>& i : fric_speed_pid_) {
         i.SetOutLimit(0.05f);
       }
 
-      // 检测是否达到目标速度
       if (motor_fric_back_left_->GetFeedback().velocity >
           param_.fric1_setpoint_speed) {
         soft_start_finish_ = true;
       }
     } else {
-      // 已达到目标速度，解除输出限制
       for (LibXR::PID<float>& i : fric_speed_pid_) {
         i.SetOutLimit(1.0f);
       }
