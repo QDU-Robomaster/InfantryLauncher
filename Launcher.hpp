@@ -2,11 +2,34 @@
 
 // clang-format off
 /* === MODULE MANIFEST V2 ===
-module_description: 发射
-constructor_args: []
-template_args: []
-required_hardware: led/LED/led1/LED1
-depends: []
+module_description: No description provided
+constructor_args:
+  - task_stack_depth: 1536
+  - launcher_param:
+      fric_setpoint_speed: [6500.0, 0.0]
+      trig_gear_ratio: 36.0
+      num_trig_tooth: 10
+      trig_freq_: 16.0
+      trig_actuator_:
+        - {k: 1.0, p: 40.0, i: 0.1, d: 0.0, i_limit: 0.0, out_limit: 0.0, cycle: false}
+        - {k: 1.0, p: 0.15, i: 0.0, d: 0.0, i_limit: 0.0, out_limit: 0.0, cycle: false}
+      fric_actuator_:
+        - {k: 0.8, p: 0.0003, i: 0.0, d: 0.0, i_limit: 0.0, out_limit: 0.6, cycle: false}
+        - {k: 0.8, p: 0.0003, i: 0.0, d: 0.0, i_limit: 0.0, out_limit: 0.6, cycle: false}
+      trig_motor_: '@&motor_trig'
+      fric_motor_:
+        - '@&motor_fric_0'
+        - '@&motor_fric_1'
+  - cmd: '@&cmd'
+  - thread_priority: LibXR::Thread::Priority::HIGH
+template_args:
+  - LauncherType: InfantryLauncher
+required_hardware:
+  - dr16
+  - can
+depends:
+  - qdu-future/CMD
+  - qdu-future/RMMotor
 === END MANIFEST === */
 // clang-format on
 
@@ -54,7 +77,18 @@ class Launcher : public LibXR::Application {
       LibXR::HardwareContainer& hw, LibXR::ApplicationManager& app,
       uint32_t task_stack_depth, LauncherParam launcher_param, CMD* cmd,
       LibXR::Thread::Priority thread_priority = LibXR::Thread::Priority::HIGH)
-      : launcher_(hw, app, task_stack_depth, launcher_param, cmd)
+      : launcher_(hw, app, task_stack_depth,
+                  typename LauncherType::LauncherParam{
+                      .fric_setpoint_speed = launcher_param.fric_setpoint_speed,
+                      .trig_gear_ratio = launcher_param.trig_gear_ratio,
+                      .num_trig_tooth = launcher_param.num_trig_tooth,
+                      .expect_trig_freq_ =
+                          launcher_param.trig_freq_,  // 关键：字段名映射
+                      .trig_actuator_ = launcher_param.trig_actuator_,
+                      .fric_actuator_ = launcher_param.fric_actuator_,
+                      .trig_motor_ = launcher_param.trig_motor_,
+                      .fric_motor_ = launcher_param.fric_motor_},
+                  cmd)
 #ifdef DEBUG
         ,
         cmd_file_(LibXR::RamFS::CreateFile(
@@ -125,6 +159,7 @@ class Launcher : public LibXR::Application {
   LibXR::Event launcher_event_;
   LibXR::Thread thread_;
   LibXR::Mutex mutex_;
+
 #ifdef DEBUG
   LibXR::RamFS::File cmd_file_;
 #endif
