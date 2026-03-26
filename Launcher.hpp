@@ -2,34 +2,11 @@
 
 // clang-format off
 /* === MODULE MANIFEST V2 ===
-module_description: No description provided
-constructor_args:
-  - task_stack_depth: 1536
-  - launcher_param:
-      fric_setpoint_speed: [6500.0, 0.0]
-      trig_gear_ratio: 36.0
-      num_trig_tooth: 10
-      trig_freq_: 16.0
-      trig_actuator_:
-        - {k: 1.0, p: 40.0, i: 0.1, d: 0.0, i_limit: 0.0, out_limit: 0.0, cycle: false}
-        - {k: 1.0, p: 0.15, i: 0.0, d: 0.0, i_limit: 0.0, out_limit: 0.0, cycle: false}
-      fric_actuator_:
-        - {k: 0.8, p: 0.0003, i: 0.0, d: 0.0, i_limit: 0.0, out_limit: 0.6, cycle: false}
-        - {k: 0.8, p: 0.0003, i: 0.0, d: 0.0, i_limit: 0.0, out_limit: 0.6, cycle: false}
-      trig_motor_: '@&motor_trig'
-      fric_motor_:
-        - '@&motor_fric_0'
-        - '@&motor_fric_1'
-  - cmd: '@&cmd'
-  - thread_priority: LibXR::Thread::Priority::HIGH
-template_args:
-  - LauncherType: InfantryLauncher
-required_hardware:
-  - dr16
-  - can
-depends:
-  - qdu-future/CMD
-  - qdu-future/RMMotor
+module_description: 发射
+constructor_args: []
+template_args: []
+required_hardware: led/LED/led1/LED1
+depends: []
 === END MANIFEST === */
 // clang-format on
 
