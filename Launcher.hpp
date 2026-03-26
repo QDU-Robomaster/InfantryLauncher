@@ -67,8 +67,8 @@ class Launcher : public LibXR::Application {
     float trig_gear_ratio;
     uint8_t num_trig_tooth;
     float trig_freq_;
-    std::array<LibXR::PID<float>, 2> trig_actuator_;
-    std::array<LibXR::PID<float>, FRIC_NUM> fric_actuator_;
+    std::array<LibXR::PID<float>::Param, 2> trig_actuator_;
+    std::array<LibXR::PID<float>::Param, FRIC_NUM> fric_actuator_;
     RMMotor* trig_motor_;
     std::array<RMMotor*, FRIC_NUM> fric_motor_;
   };

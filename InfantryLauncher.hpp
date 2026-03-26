@@ -79,8 +79,8 @@ class InfantryLauncher {
     float trig_gear_ratio;
     uint8_t num_trig_tooth;
     float expect_trig_freq_;
-    std::array<LibXR::PID<float>, 2> trig_actuator_;
-    std::array<LibXR::PID<float>, FRIC_NUM> fric_actuator_;
+    std::array<LibXR::PID<float>::Param, 2> trig_actuator_;
+    std::array<LibXR::PID<float>::Param, FRIC_NUM> fric_actuator_;
     RMMotor* trig_motor_;
     std::array<RMMotor*, FRIC_NUM> fric_motor_;
   };
@@ -113,11 +113,11 @@ class InfantryLauncher {
    * @param cmd CMD模块指针
    */
   InfantryLauncher(LibXR::HardwareContainer& hw, LibXR::ApplicationManager& app,
-                   uint32_t task_stack_depth,
-                   LauncherParam launch_param, CMD* cmd)
-      : param_(launch_param) {
-
-
+                   uint32_t task_stack_depth, LauncherParam launch_param,
+                   CMD* cmd)
+      : param_(launch_param),
+        trig_pid_angle(launch_param.trig_actuator_[0]),
+        trig_pid_speed(launch_param.trig_actuator_[1]),fric_pid_0(launch_param.fric_actuator_[0]),fric_pid_1(launch_param.fric_actuator_[1]) {
     last_online_time_ = LibXR::Timebase::GetMicroseconds();
     last_heat_time_ = LibXR::Timebase::GetMilliseconds();
   }
@@ -228,10 +228,10 @@ for (int i = 0; i < FRIC_NUM; i++) {
    */
   void SetMode(uint32_t mode) {
     launcher_event_ = static_cast<LauncherEvent>(mode);
-    param_.fric_actuator_[0].Reset();
-    param_.fric_actuator_[1].Reset();
-    param_.trig_actuator_[0].Reset();
-    param_.trig_actuator_[1].Reset();
+    fric_pid_0.Reset();
+    fric_pid_1.Reset();
+    trig_pid_angle.Reset();
+    trig_pid_speed.Reset();
   }
 
   /**
@@ -243,10 +243,10 @@ for (int i = 0; i < FRIC_NUM; i++) {
     launcher_state_ = LauncherState::RELAX;
     trig_mode_ = TrigMode::RELAX;
 
-    param_.fric_actuator_[0].Reset();
-    param_.fric_actuator_[1].Reset();
-    param_.trig_actuator_[0].Reset();
-    param_.trig_actuator_[1].Reset();
+    fric_pid_0.Reset();
+    fric_pid_1.Reset();
+   trig_pid_angle.Reset();
+    trig_pid_speed.Reset();
 
     target_trig_angle_ = trig_angle_;
     shoot_active_ = false;
@@ -278,7 +278,10 @@ for (int i = 0; i < FRIC_NUM; i++) {
  private:
   std::array<Motor::Feedback, FRIC_NUM> param_fric_{};
   Motor::Feedback param_trig_{};
-
+  LibXR::PID<float> trig_pid_angle;
+  LibXR::PID<float> trig_pid_speed;
+  LibXR::PID<float> fric_pid_0;
+  LibXR::PID<float> fric_pid_1;
 
   LauncherParam param_;
 
@@ -599,14 +602,14 @@ for (int i = 0; i < FRIC_NUM; i++) {
    * @details 角度环生成参考速度，速度环生成最终控制输出，并进行速度限幅。
    */
   void TrigControl(float& out_trig, float target_trig_angle, float dt) {
-    float plate_omega_ref = param_.trig_actuator_[0].Calculate(
+    float plate_omega_ref = trig_pid_angle.Calculate(
         target_trig_angle, trig_angle_,
         param_trig_.omega / param_.trig_gear_ratio, dt);
     float omega_limit =
         static_cast<float>(1.5f * M_2PI * trig_freq_ / param_.num_trig_tooth);
     float motor_omega_ref =
         std::clamp(plate_omega_ref, -omega_limit, omega_limit);
-    out_trig = param_.trig_actuator_[1].Calculate(
+    out_trig =trig_pid_speed.Calculate(
         motor_omega_ref, param_trig_.omega / param_.trig_gear_ratio, dt);
   }
 
@@ -620,9 +623,9 @@ for (int i = 0; i < FRIC_NUM; i++) {
    */
   void FricControl(float& out_fric_0, float& out_fric_1, float target_rpm,
                    float dt) {
-    out_fric_0 = param_.fric_actuator_[0].Calculate(target_rpm,
+    out_fric_0 = fric_pid_0.Calculate(target_rpm,
                                                     param_fric_[0].velocity, dt);
-    out_fric_1 = param_.fric_actuator_[1].Calculate(target_rpm,
+    out_fric_1 = fric_pid_1.Calculate(target_rpm,
                                                     param_fric_[1].velocity, dt);
 
     if (launcher_event_ == LauncherEvent::SET_FRICMODE_SAFE) {
