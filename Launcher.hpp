@@ -54,8 +54,7 @@ class Launcher : public LibXR::Application {
       LibXR::HardwareContainer& hw, LibXR::ApplicationManager& app,
       uint32_t task_stack_depth, LauncherParam launcher_param, CMD* cmd,
       LibXR::Thread::Priority thread_priority = LibXR::Thread::Priority::HIGH)
-      : launcher_(hw, app, task_stack_depth,
-                  typename LauncherType::LauncherParam{}, cmd)
+      : launcher_(hw, app, task_stack_depth, launcher_param, cmd)
 #ifdef DEBUG
         ,
         cmd_file_(LibXR::RamFS::CreateFile(
