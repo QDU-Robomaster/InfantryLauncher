@@ -35,8 +35,8 @@ depends: []
 namespace launcher::param {
 constexpr float TRIG_STEP = static_cast<float>(M_2PI) / 10.0f;
 constexpr float JAM_TORQUE = 0.015f;
-constexpr float FRIC_DROP_RPM = 218.0f;
-constexpr float JAM_TOGGLE_INTERVAL_SEC = 0.08f;
+constexpr float FRIC_DROP_RPM = 70.0f;
+constexpr float JAM_TOGGLE_INTERVAL_SEC = 0.02f;
 constexpr float LONG_PRESS_THRESHOLD_SEC = 0.5f;
 constexpr float HEAT_TICK_SEC = 0.05f;
 }  // namespace launcher::param
@@ -89,13 +89,6 @@ class InfantryLauncher {
     float heat_threshold;
     bool allow_fire;
   };
-  struct HeatCtrlParam {
-    float predict_time = 0.3f;
-    float margin = 40.0f;
-    float max_rate = 18.0f;
-    float step = 2.0f;
-    float heat_per_shot = 10.0f;  // 17mm 默认
-  };
 
   /**
    * @brief 步兵发射器构造函数
@@ -147,7 +140,6 @@ class InfantryLauncher {
     UNUSED(cmd);
 
     last_online_time_ = LibXR::Timebase::GetMicroseconds();
-    last_heat_time_ = LibXR::Timebase::GetMilliseconds();
   }
 
   /**
@@ -156,6 +148,8 @@ class InfantryLauncher {
    */
   void Update() {
     last_online_time_ = LibXR::Timebase::GetMicroseconds();
+    heat_limit_.single_heat = 10.0f;
+    heat_limit_.heat_threshold = 6.0f;
 
     motor_fric_0_->Update();
     motor_fric_1_->Update();
@@ -182,6 +176,7 @@ class InfantryLauncher {
   void Solve() {
     RunStateMachine();
     UpdateShotLatency();
+    PublishTopics();
   }
 
   /**
@@ -189,7 +184,7 @@ class InfantryLauncher {
    * @details 计算拨盘与摩擦轮控制量并下发到电机，包含电机状态检查和错误恢复。
    */
   void Control() {
-    out_trig = 0.0f;
+    float out_trig = 0.0f;
     float out_fric_0 = 0.0f;
     float out_fric_1 = 0.0f;
     Motor::Feedback trig_fb{};
@@ -319,37 +314,32 @@ class InfantryLauncher {
   float last_num = 0;
   float dt_ = 0.0f;
   float target_rpm_ = 0.0f;
-  bool ok;
-  float f_max;
-  float fire_rate;
   float trig_freq_ = 0.0f;
-  float last_trig_freq_ = 0;
-  float out_trig = 0.0f;
-  float motor_omega_ref;
-  float plate_omega_ref;
+  float last_trig_freq_ = 0.0f;
   float trig_angle_ = 0.0f;
   float target_trig_angle_ = 0.0f;
   float last_motor_angle_ = 0.0f;
 
   float number_ = 0.0f;
   float shoot_dt_ = 0.0f;
-  float delta_time = 0.0f;
+
   bool last_fire_notify_ = false;
   bool press_continue_ = false;
   bool is_reverse_ = false;
   bool shoot_active_ = false;
-  float shoot_delta_time = 0;
+
   float jam_keep_time_s_ = 0.0f;
 
   LibXR::MillisecondTimestamp fire_press_time_ = 0;
   LibXR::MillisecondTimestamp last_trig_time_ = 0;
   LibXR::MillisecondTimestamp last_jam_time_ = 0;
   LibXR::MillisecondTimestamp last_heat_time_ = 0;
+  LibXR::MillisecondTimestamp last_check_time_ = 0;
   LibXR::MicrosecondTimestamp last_online_time_ = 0;
   LibXR::MillisecondTimestamp shoot_time_ = 0;
   LibXR::MillisecondTimestamp receive_fire_time_ = 0;
   LibXR::MillisecondTimestamp shot_start_time_ = 0;
-
+  LibXR::MillisecondTimestamp last_add_time_ = 0;
   LibXR::Topic shoot_waiting_ = LibXR::Topic::CreateTopic<float>("shoot_dt");
   LibXR::Topic shoot_number_ = LibXR::Topic::CreateTopic<float>("shoot_number");
   LibXR::Topic shoot_freq_ = LibXR::Topic::CreateTopic<float>("trig_freq");
@@ -360,13 +350,12 @@ class InfantryLauncher {
   TrigMode last_trig_mode_ = TrigMode::RELAX;
 
   HeatLimit heat_limit_{
-      .single_heat = 10.0f,
+      .single_heat = 0.0f,
       .launched_num = 0.0f,
       .current_heat = 0.0f,
-      .heat_threshold = 2.30f,
+      .heat_threshold = 0.0f,
       .allow_fire = true,
   };
-  HeatCtrlParam heat_param;
 
   /*-----------------工具函数---------------------------------------------------*/
 
@@ -376,6 +365,11 @@ class InfantryLauncher {
    * RELAX/STOP/NORMAL/JAMMED。
    */
   void UpdateLauncherState() {
+    // if (fabsf(param_trig_.torque) > launcher::param::JAM_TORQUE) {
+    //   launcher_state_ = LauncherState::JAMMED;
+    //   return;
+    // }
+
     if (launcher_event_ != LauncherEvent::SET_FRICMODE_READY) {
       launcher_state_ = LauncherState::RELAX;
       return;
@@ -396,11 +390,12 @@ class InfantryLauncher {
    */
   void RunStateMachine() {
     auto now = LibXR::Timebase::GetMilliseconds();
-    ShooterHeatControl(now);
     UpdateTriggerMode(now);
     UpdateTriggerSetpoint(now);
-    CurrentHeat(now);
     // UpdateShotJudge(now);
+    CurrentHeat(now);
+    UpdateHeatControl(now);
+
     last_fire_notify_ = launcher_cmd_.isfire;
   }
 
@@ -467,7 +462,6 @@ class InfantryLauncher {
         break;
 
       case TrigMode::CONTINUE: {
-        // if (!shoot_active_) {
         float trig_freq = std::max(trig_freq_, 1e-3f);
         float interval_s = 1.0f / trig_freq;
         float since_last = (now - last_trig_time_).ToSecondf();
@@ -477,21 +471,21 @@ class InfantryLauncher {
           shoot_active_ = true;
           shot_start_time_ = now;
         }
-        // }
       } break;
 
       case TrigMode::JAM: {
         shoot_active_ = false;
         shot_start_time_ = 0;
         jam_keep_time_s_ = (now - last_jam_time_).ToSecondf();
-        if (last_trig_mode_ != TrigMode::JAM) {
-          is_reverse_ = true;
+        if (jam_keep_time_s_ >= launcher::param::JAM_TOGGLE_INTERVAL_SEC) {
+          if (last_trig_mode_ != TrigMode::JAM) {
+            is_reverse_ = true;
+          }
+          target_trig_angle_ =
+              trig_angle_ + (is_reverse_ ? -0.80f * launcher::param::TRIG_STEP
+                                         : launcher::param::TRIG_STEP);
+          is_reverse_ = !is_reverse_;
         }
-        target_trig_angle_ =
-            trig_angle_ + (is_reverse_ ? -0.80f * launcher::param::TRIG_STEP
-                                       : launcher::param::TRIG_STEP);
-        is_reverse_ = !is_reverse_;
-
         last_jam_time_ = now;
       } break;
     }
@@ -509,6 +503,11 @@ class InfantryLauncher {
       return;
     }
     static LibXR::MillisecondTimestamp last_time_ = 0.0f;
+    auto delta_time = (now - last_time_).ToSecondf();
+    if (delta_time < 0.01f) {
+      return;
+    }
+    last_time_ = now;
     bool success =
         (fabsf(param_fric_0_.velocity) <
          (param_.fric1_setpoint_speed - launcher::param::FRIC_DROP_RPM)) &&
@@ -563,86 +562,77 @@ class InfantryLauncher {
     }
   }
 
+  /**
+   * @brief 热量管理与弹频调度
+   * @details 周期更新当前热量，计算是否允许发射，并依据剩余热量调整目标弹频。
+   */
+  void UpdateHeatControl(LibXR::MillisecondTimestamp now) {
+    float delta_time = (now - last_heat_time_).ToSecondf();
+
+    if (delta_time < launcher::param::HEAT_TICK_SEC) {
+      return;
+    }
+    last_heat_time_ = now;
+
+
+    float residuary_heat =
+        ref_data_.heat_limit - heat_limit_.current_heat;
+    heat_limit_.allow_fire = residuary_heat > heat_limit_.single_heat;
+
+    if (!heat_limit_.allow_fire) {
+      trig_freq_ = ref_data_.cooling_rate / heat_limit_.single_heat;
+      return;
+    }
+
+    if (residuary_heat <=
+        heat_limit_.single_heat * heat_limit_.heat_threshold) {
+      float safe_freq =
+          ref_data_.cooling_rate / heat_limit_.single_heat;
+      float ratio = residuary_heat /
+                    (heat_limit_.single_heat * heat_limit_.heat_threshold);
+      trig_freq_ = ratio * (param_.expect_trig_freq_ - safe_freq) + safe_freq;
+      return;
+    }
+
+    trig_freq_ = param_.expect_trig_freq_;
+  }
   void CurrentHeat(LibXR::MillisecondTimestamp now) {
     // ShootNumber();
-    delta_time = (now - last_heat_time_).ToSecondf();
+    float delta_time = (now - last_check_time_).ToSecondf();
     now_num = trig_angle_ / launcher::param::TRIG_STEP;
 
     if (delta_time < 0.1) {
       return;
     }
     delta_time = 0;
+    // heat_limit_.launched_num =
+    // (trig_angle_-last_trig_angle)/launcher::param::TRIG_STEP;
     last_num = last_trig_angle / launcher::param::TRIG_STEP;
+    // if(trig_angle_>last_trig_angle+0.1*launcher::param::TRIG_STEP)
     {
       heat_limit_.launched_num = now_num - last_num;
     }
-    last_heat_time_ = now;
+    last_check_time_ = now;
     heat_limit_.current_heat +=
         heat_limit_.single_heat * heat_limit_.launched_num -
-        ref_data_.cooling_rate / 10;
+        ref_data_.cooling_rate * 0.1;
     number_ += heat_limit_.launched_num;
     last_trig_angle = trig_angle_;
     if (heat_limit_.current_heat <= 0) {
       heat_limit_.current_heat = 0;
     }
-  }
-  float CalcMaxFireRatePredict(float heat_now, float heat_limit, float cooling,
-                               HeatCtrlParam param,
-                               LibXR::MillisecondTimestamp now) {
-    int steps = 35;
-
-    for (float f = param.max_rate; f > 0; f -= 2) {
-      float heat = heat_now;
-      ok = true;
-
-      for (int i = 0; i < steps; i++) {
-        float shots = f * dt_;
-
-        heat += param.heat_per_shot * shots;
-
-        heat -= cooling * dt_;
-
-        if (heat > (heat_limit - param.margin)) {
-          ok = false;
-          break;
+    if (last_trig_freq_ ==
+        ref_data_.cooling_rate / heat_limit_.single_heat) {
+      if (trig_freq_ !=
+          ref_data_.cooling_rate / heat_limit_.single_heat) {
+        if ((now - last_add_time_).ToSecondf() > 10.0f) {
+          heat_limit_.current_heat += 20;
+          last_add_time_ = now;
         }
       }
-
-      if (ok) return f;
     }
-
-    return 0.0f;
   }
 
-  void ShooterHeatControl(LibXR::MillisecondTimestamp now) {
-    static LibXR::MillisecondTimestamp last_shoot_time_ = 0;
-    static LibXR::MillisecondTimestamp last_heat_time_ = 0;
-
-    float heat_now = heat_limit_.current_heat;
-
-    float heat_limit = ref_data_.heat_limit;
-
-    float cooling = ref_data_.cooling_rate;
-
-    f_max =
-        CalcMaxFireRatePredict(heat_now, heat_limit, cooling, heat_param, now);
-
-    shoot_delta_time = (now - last_shoot_time_).ToSecondf();
-    last_shoot_time_ = now;
-
-    float target_fire_rate = 18;
-
-    fire_rate = LibXR::min(target_fire_rate, f_max);
-
-    trig_freq_ = fire_rate;
-    if (last_trig_freq_ != 0 && trig_freq_ == 0) {
-      if ((now - last_heat_time_).ToSecondf() > 10.0) {
-        heat_limit_.current_heat += 10;
-        last_heat_time_ = now;
-      }
-    }
-    last_trig_freq_ = trig_freq_;
-  }
   /**
    * @brief 发布调试与统计话题
    * @details 发布发射等待时间、累计发射数和当前弹频。
@@ -661,15 +651,15 @@ class InfantryLauncher {
    * @details 角度环生成参考速度，速度环生成最终控制输出，并进行速度限幅。
    */
   void TrigControl(float& out_trig, float target_trig_angle, float dt) {
-    plate_omega_ref =
-        pid_trig_angle_.Calculate(target_trig_angle, trig_angle_, dt);
-    // float omega_limit =
-    //     static_cast<float>(1.5f * M_2PI * trig_freq_ /
-    //     param_.num_trig_tooth);
-    //  motor_omega_ref =
-    //     std::clamp(plate_omega_ref, -omega_limit, omega_limit);
+    float plate_omega_ref = pid_trig_angle_.Calculate(
+        target_trig_angle, trig_angle_,
+        param_trig_.omega / param_.trig_gear_ratio, dt);
+    float omega_limit =
+        static_cast<float>(1.5f * M_2PI * trig_freq_ / param_.num_trig_tooth);
+    float motor_omega_ref =
+        std::clamp(plate_omega_ref, -omega_limit, omega_limit);
     out_trig = pid_trig_sp_.Calculate(
-        plate_omega_ref, param_trig_.omega / param_.trig_gear_ratio, dt);
+        motor_omega_ref, param_trig_.omega / param_.trig_gear_ratio, dt);
   }
 
   /**
@@ -686,8 +676,8 @@ class InfantryLauncher {
     out_fric_1 = pid_fric_1_.Calculate(target_rpm, param_fric_1_.velocity, dt);
 
     if (launcher_event_ == LauncherEvent::SET_FRICMODE_SAFE) {
-      out_fric_0 /= 50.0f;
-      out_fric_1 /= 50.0f;
+      out_fric_0 /= 50;
+      out_fric_1 /= 50;
     }
   }
 };

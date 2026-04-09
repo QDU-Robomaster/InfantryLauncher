@@ -213,7 +213,7 @@ class Launcher : public LibXR::Application {
 
   static void ThreadFunc(Launcher* self) {
     LibXR::Topic::ASyncSubscriber<CMD::LauncherCMD> cmd_sub("launcher_cmd");
-    LibXR::Topic::ASyncSubscriber<Referee::LauncherPack> launcher_ref(
+    LibXR::Topic::ASyncSubscriber<::Referee::LauncherPack> launcher_ref(
         "launcher_ref");
     cmd_sub.StartWaiting();
     launcher_ref.StartWaiting();

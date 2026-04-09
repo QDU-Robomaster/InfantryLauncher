@@ -335,6 +335,10 @@ class HeroLauncher {
 
   void SetControlDt(float dt) { dt_ = dt; }
 
+  void UpdateRefData(const ::Referee::LauncherPack& ref_data) {
+    ref_data_ = ref_data;
+  }
+
   /**
    * @brief 调试命令入口
    */
