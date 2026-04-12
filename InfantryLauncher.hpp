@@ -44,7 +44,6 @@ constructor_args:
       fric1_setpoint_speed: 6500.0
       trig_gear_ratio: 36
       num_trig_tooth: 10
-      trig_freq_: 10.0
   - cmd: '@&cmd'
   - thread_priority: LibXR::Thread::Priority::HIGH
 required_hardware:
