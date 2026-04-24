@@ -81,7 +81,7 @@ depends:
 #endif
 
 namespace launcher::param {
-constexpr float TRIG_STEP = static_cast<float>(M_2PI) / 10.0f;
+constexpr float TRIG_STEP = static_cast<float>(LibXR::TWO_PI) / 10.0f;
 constexpr float JAM_TORQUE = 0.025f;
 constexpr float JAM_TOGGLE_INTERVAL_SEC = 0.02f;
 constexpr float LONG_PRESS_THRESHOLD_SEC = 0.5f;
@@ -791,8 +791,8 @@ class InfantryLauncher {
     float plate_omega_ref = pid_trig_angle_.Calculate(
         target_trig_angle, trig_angle_,
         param_trig_.omega / param_.trig_gear_ratio, dt);
-    float omega_limit =
-        static_cast<float>(1.5f * M_2PI * trig_freq_ / param_.num_trig_tooth);
+    float omega_limit = 1.5f * static_cast<float>(LibXR::TWO_PI) * trig_freq_ /
+                        param_.num_trig_tooth;
     float motor_omega_ref =
         std::clamp(plate_omega_ref, -omega_limit, omega_limit);
     out_trig = pid_trig_sp_.Calculate(
