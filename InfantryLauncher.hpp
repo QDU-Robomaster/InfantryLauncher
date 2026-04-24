@@ -81,7 +81,7 @@ depends:
 #endif
 
 namespace launcher::param {
-constexpr float TRIG_STEP = static_cast<float>(M_2PI) / 10.0f;
+constexpr float TRIG_STEP = static_cast<float>(LibXR::TWO_PI) / 10.0f;
 constexpr float JAM_TORQUE = 0.025f;
 constexpr float JAM_TOGGLE_INTERVAL_SEC = 0.02f;
 constexpr float LONG_PRESS_THRESHOLD_SEC = 0.5f;
