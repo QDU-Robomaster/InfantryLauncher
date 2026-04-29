@@ -73,12 +73,6 @@ jobs:
           ref: master
           path: Modules/RMMotor
 
-      - name: Checkout DebugCore module
-        uses: actions/checkout@v4
-        with:
-          repository: QDU-Robomaster/DebugCore
-          path: Modules/DebugCore
-
       - name: Checkout Referee module
         uses: actions/checkout@v4
         with:
