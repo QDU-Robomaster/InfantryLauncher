@@ -3,10 +3,56 @@
 // clang-format off
 /* === MODULE MANIFEST V2 ===
 module_description: No description provided
-constructor_args: []
+constructor_args:
+  - motor_fric_front_left: '@nullptr'
+  - motor_fric_front_right: '@nullptr'
+  - motor_fric_back_left: '@nullptr'
+  - motor_fric_back_right: '@nullptr'
+  - motor_trig: '@nullptr'
+  - task_stack_depth: 0
+  - pid_trig_angle:
+      k: 0.0
+      p: 0.0
+      i: 0.0
+      d: 0.0
+      i_limit: 0.0
+      out_limit: 0.0
+      cycle: false
+  - pid_trig_speed:
+      k: 0.0
+      p: 0.0
+      i: 0.0
+      d: 0.0
+      i_limit: 0.0
+      out_limit: 0.0
+      cycle: false
+  - pid_fric_0:
+      k: 0.0
+      p: 0.0
+      i: 0.0
+      d: 0.0
+      i_limit: 0.0
+      out_limit: 0.0
+      cycle: false
+  - pid_fric_1:
+      k: 0.0
+      p: 0.0
+      i: 0.0
+      d: 0.0
+      i_limit: 0.0
+      out_limit: 0.0
+      cycle: false
+  - launch_param:
+      fric_setpoint_speed: 0.0
+      trig_gear_ratio: 0.0
+      num_trig_tooth: 0
+      expect_trig_freq_: 0.0
+  - cmd: '@nullptr'
 template_args: []
 required_hardware: []
-depends: []
+depends:
+  - qdu-future/CMD
+  - qdu-future/RMMotor
 === END MANIFEST === */
 // clang-format on
 
