@@ -48,6 +48,7 @@ constructor_args:
       num_trig_tooth: 0
       expect_trig_freq_: 0.0
   - cmd: '@nullptr'
+  - referee: '@nullptr'
 template_args: []
 required_hardware: []
 depends:
@@ -173,7 +174,8 @@ class InfantryLauncher {
                    LibXR::PID<float>::Param pid_param_trig_speed,
                    LibXR::PID<float>::Param pid_param_fric_0,
                    LibXR::PID<float>::Param pid_param_fric_1,
-                   LauncherParam launch_param, CMD* cmd)
+                   LauncherParam launch_param, CMD* cmd,
+                   Referee* referee = nullptr)
       : motor_fric_0_(motor_fric_front_left),
         motor_fric_1_(motor_fric_front_right),
         motor_trig_(motor_trig),
@@ -183,7 +185,7 @@ class InfantryLauncher {
         pid_fric_1_(pid_param_fric_1),
         param_(launch_param),
         default_expect_trig_freq_(launch_param.expect_trig_freq_),
-
+        referee_(referee),
         cmd_(cmd) {
     UNUSED(hw);
     UNUSED(app);
@@ -192,19 +194,28 @@ class InfantryLauncher {
     UNUSED(cmd);
     thread_.Create(this, ThreadFunction, "LauncherThread", task_stack_depth,
                    LibXR::Thread::Priority::MEDIUM);
+    if (referee_ != nullptr) {
+      timer_ui_ = LibXR::Timer::CreateTask(DrawUI, this, UI_REFRESH_PERIOD_MS);
+      LibXR::Timer::Add(timer_ui_);
+      LibXR::Timer::Start(timer_ui_);
+    }
 
     auto lost_ctrl_callback = LibXR::Callback<uint32_t>::Create(
         [](bool in_isr, InfantryLauncher* launcher, uint32_t event_id) {
           UNUSED(in_isr);
           UNUSED(event_id);
+          launcher->mutex_.Lock();
           launcher->LostCtrl();
+          launcher->mutex_.Unlock();
         },
         this);
 
     auto callback = LibXR::Callback<uint32_t>::Create(
         [](bool in_isr, InfantryLauncher* launcher, uint32_t event_id) {
           UNUSED(in_isr);
+          launcher->mutex_.Lock();
           launcher->SetMode(event_id);
+          launcher->mutex_.Unlock();
         },
         this);
 
@@ -600,6 +611,18 @@ class InfantryLauncher {
   }
 
  private:
+  // 发射机构 UI 使用的图层编号，当前摩擦轮状态文字画在这一层。
+  static constexpr uint8_t UI_LAYER_LAUNCHER = 1;
+  // 发射机构 UI 文字共用的线宽和字号。
+  static constexpr uint16_t UI_CHAR_WIDTH = 2;
+  static constexpr uint16_t UI_FONT_SIZE = 20;
+  // 摩擦轮状态文字 ON/OFF 的显示位置。
+  static constexpr uint16_t UI_FRIC_TEXT_X = 160;
+  static constexpr uint16_t UI_FRIC_TEXT_Y = 580;
+  // 发射机构 UI 的刷新周期，以及“删层/发文字”两阶段轮转节奏。
+  static constexpr uint32_t UI_REFRESH_PERIOD_MS = 130;
+  static constexpr uint32_t UI_REFRESH_PHASE_COUNT = 2;
+
   LauncherEvent launcher_event_ = LauncherEvent::SET_FRICMODE_RELAX;
   LauncherState launcherstate_;
   LauncherState last_launcherstate_ = LauncherState::RELAX;
@@ -638,6 +661,7 @@ class InfantryLauncher {
   LauncherParam param_;
   float default_expect_trig_freq_;
   CMD::LauncherCMD launcher_cmd_;
+  Referee* referee_ = nullptr;
   float dt_ = 0;
   LibXR::MicrosecondTimestamp now_;
   LibXR::MicrosecondTimestamp last_trig_time_ = 0;
@@ -645,13 +669,70 @@ class InfantryLauncher {
   LibXR::Topic shoot_number_ = LibXR::Topic::CreateTopic<float>("shoot_number");
   // bool press_continue_ = false;
   bool last_fire_notify_ = false;
+  bool ui_text_initialized_ = false;
+  uint32_t ui_refresh_tick_ = 0;
 
   LibXR::Thread thread_;
+  LibXR::Timer::TimerHandle timer_ui_{};
   LibXR::Mutex mutex_;
   LibXR::Event launcher_event_handler_;
   CMD* cmd_;
   float cal_trig_angle_ = 0.0f;
   float target_rpm_ = 0;
+
+  static void DrawUI(InfantryLauncher* launcher) {
+    if (launcher->referee_ == nullptr) {
+      return;
+    }
+
+    const uint16_t ROBOT_ID = launcher->referee_->GetRobotID();
+    if (ROBOT_ID == 0) {
+      return;
+    }
+    const uint16_t CLIENT_ID = launcher->referee_->GetClientID(ROBOT_ID);
+
+    launcher->mutex_.Lock();
+    const uint32_t UI_PHASE =
+        launcher->ui_refresh_tick_ % UI_REFRESH_PHASE_COUNT;
+    launcher->ui_refresh_tick_++;
+    const bool FRIC_ENABLED =
+        launcher->launcher_event_ == LauncherEvent::SET_FRICMODE_READY;
+    const bool UI_TEXT_INITIALIZED = launcher->ui_text_initialized_;
+    launcher->mutex_.Unlock();
+
+    Referee::UILayerDelete ui_del{};
+    ui_del.delete_type =
+        static_cast<uint8_t>(Referee::UIDeleteType::UI_DELETE_LAYER);
+    ui_del.layer = UI_LAYER_LAUNCHER;
+    if (!UI_TEXT_INITIALIZED && UI_PHASE == 0 &&
+        launcher->referee_->SendUILayerDelete(ROBOT_ID, CLIENT_ID, ui_del) !=
+            LibXR::ErrorCode::OK) {
+      return;
+    }
+
+    if (UI_PHASE != 1) {
+      return;
+    }
+
+    Referee::UICharacter char_fig{};
+    // 绘制发射机构的摩擦轮状态文字：
+    // READY 显示 ON，其余状态显示 OFF。
+    launcher->referee_->FillCharacter(
+        char_fig, "FRC",
+        UI_TEXT_INITIALIZED ? Referee::UIFigureOp::UI_OP_MODIFY
+                            : Referee::UIFigureOp::UI_OP_ADD,
+        UI_LAYER_LAUNCHER,
+        FRIC_ENABLED ? Referee::UIColor::UI_COLOR_GREEN
+                     : Referee::UIColor::UI_COLOR_ORANGE,
+        UI_FONT_SIZE, UI_CHAR_WIDTH, UI_FRIC_TEXT_X, UI_FRIC_TEXT_Y,
+        FRIC_ENABLED ? "ON" : "OFF");
+    if (launcher->referee_->SendUICharacter(ROBOT_ID, CLIENT_ID, char_fig) ==
+        LibXR::ErrorCode::OK) {
+      launcher->mutex_.Lock();
+      launcher->ui_text_initialized_ = true;
+      launcher->mutex_.Unlock();
+    }
+  }
 
   float GetOptimalBurstFreq() const {
     for (const auto& level : launcher::param::BURST_5S_TABLE) {
