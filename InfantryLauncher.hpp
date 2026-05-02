@@ -232,12 +232,12 @@ class InfantryLauncher {
         static_cast<uint32_t>(FireModeEvent::SET_FIREMODE_BOOST),
         fire_mode_callback);
 
-    auto launcher_cmd_callback = LibXR::Callback<LibXR::RawData&>::Create(
-        [](bool in_isr, InfantryLauncher* Launcher, LibXR::RawData& raw_data) {
+    auto launcher_cmd_callback = LibXR::Topic::Callback::Create(
+        [](bool in_isr, InfantryLauncher* launcher, LibXR::RawData& raw_data) {
           UNUSED(in_isr);
           CMD::LauncherCMD cmd_lau =
               *reinterpret_cast<CMD::LauncherCMD*>(raw_data.addr_);
-          Launcher->launcher_cmd_.isfire = cmd_lau.isfire;
+          launcher->launcher_cmd_.isfire = cmd_lau.isfire;
         },
         this);
 
