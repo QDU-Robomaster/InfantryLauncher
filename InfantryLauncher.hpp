@@ -122,7 +122,6 @@ class InfantryLauncher {
     float bullet_speed;
   } RefereeData;
 
-
   struct LauncherParam {
     /*摩擦轮转速*/
     float fric_setpoint_speed;
@@ -177,7 +176,7 @@ class InfantryLauncher {
                    LibXR::PID<float>::Param pid_param_trig_speed,
                    LibXR::PID<float>::Param pid_param_fric_0,
                    LibXR::PID<float>::Param pid_param_fric_1,
-                   LauncherParam launch_param, CMD* cmd,Referee& referee)
+                   LauncherParam launch_param, CMD* cmd, Referee* referee)
       : motor_fric_0_(motor_fric_front_left),
         motor_fric_1_(motor_fric_front_right),
         motor_trig_(motor_trig),
@@ -187,7 +186,7 @@ class InfantryLauncher {
         pid_fric_1_(pid_param_fric_1),
         param_(launch_param),
         cmd_(cmd),
-        referee_(&referee) {
+        referee_(referee) {
     UNUSED(hw);
     UNUSED(app);
     UNUSED(cmd);
@@ -250,10 +249,9 @@ class InfantryLauncher {
     void (*DrawUi)(InfantryLauncher*) = [](InfantryLauncher* infantry) {
       infantry->DrawUI();
     };
-      auto DrawUi_ = LibXR::Timer::CreateTask(DrawUi, this, 125);
-      LibXR::Timer::Add(DrawUi_);
-      LibXR::Timer::Start(DrawUi_);
-
+    auto DrawUi_ = LibXR::Timer::CreateTask(DrawUi, this, 125);
+    LibXR::Timer::Add(DrawUi_);
+    LibXR::Timer::Start(DrawUi_);
   }
 
   static void ThreadFunction(InfantryLauncher* launcher) {
@@ -276,8 +274,8 @@ class InfantryLauncher {
             launcher_referee_tp.GetData().rs.shooter_heat_limit;
         launcher_referee_tp.StartWaiting();
         /*referee怎么还没更新*/
-          //  launcher->referee_data_.bullet_speed =
-          //   launcher_referee_tp.GetData().shooter_bullet_speed;
+        //  launcher->referee_data_.bullet_speed =
+        //   launcher_referee_tp.GetData().shooter_bullet_speed;
       }
 
       launcher->Update();
@@ -299,24 +297,25 @@ class InfantryLauncher {
     last_online_time_ = now_;
 
     /*不信任裁判系统的冗余处理*/
-    if (referee_data_.heat_cooling == 0 or referee_data_.heat_limit == 0)
-    {
+    if (referee_data_.heat_cooling == 0 or referee_data_.heat_limit == 0) {
       referee_data_.heat_cooling = 40;
       referee_data_.heat_limit = 240;
     }
 
-    if (referee_data_.bullet_speed <0.0f or
+    if (referee_data_.bullet_speed < 0.0f or
         referee_data_.bullet_speed > 30.0f) {
-      referee_data_.bullet_speed = param_.target_bullet_speed - 2.0f*param_.bullet_speed_tolerance;
+      referee_data_.bullet_speed =
+          param_.target_bullet_speed - 2.0f * param_.bullet_speed_tolerance;
     }
 
-
-    this->expect_trig_freq_ = std::min(param_.max_trig_freq, referee_data_.heat_limit/param_.single_heat/2.0f);
-    heat_limit_.heat_threshold = static_cast<uint8_t>(expect_trig_freq_/1.2f);
+    this->expect_trig_freq_ =
+        std::min(param_.max_trig_freq,
+                 referee_data_.heat_limit / param_.single_heat / 2.0f);
+    heat_limit_.heat_threshold = static_cast<uint8_t>(expect_trig_freq_ / 1.2f);
 
     if (fire_mode_ == FireMode::BOOST) {
-    expect_trig_freq_ =param_.max_trig_freq;
-    heat_limit_.heat_threshold =2;
+      expect_trig_freq_ = param_.max_trig_freq;
+      heat_limit_.heat_threshold = 2;
     }
 
     motor_fric_0_->Update();
@@ -352,7 +351,7 @@ class InfantryLauncher {
 
     if (launcher_event_ != LauncherEvent::SET_FRICMODE_READY) {
       launcherstate_ = LauncherState::RELAX;
-    }else if (single_fire_requested || continuous_fire_requested) {
+    } else if (single_fire_requested || continuous_fire_requested) {
       launcherstate_ = LauncherState::NORMAL;
     } else {
       launcherstate_ = LauncherState::STOP;
@@ -365,8 +364,6 @@ class InfantryLauncher {
       need_cali_ = true;
     }
   }
-
-
 
   void SetTrig() {
     /*根据状态选择拨弹盘模式*/
@@ -407,14 +404,13 @@ class InfantryLauncher {
 
         break;
       case TRIGMODE::SAFE: {
-
       } break;
       case TRIGMODE::CALI: {
         target_trig_angle_ += param_.cali_speed * dt_;
         if (((fabs(param_fric_0_.velocity) <
-              (expect_rpm_ - param_.fric_slowdown_threshold*expect_rpm_ )) and
+              (expect_rpm_ - param_.fric_slowdown_threshold * expect_rpm_)) and
              (fabs(param_fric_1_.velocity) <
-              (expect_rpm_ - param_.fric_slowdown_threshold*expect_rpm_ )))) {
+              (expect_rpm_ - param_.fric_slowdown_threshold * expect_rpm_)))) {
           target_trig_angle_ += param_.cali_step;
           last_trig_time_ = now_;
           need_cali_ = false;
@@ -440,7 +436,7 @@ class InfantryLauncher {
         float trig_speed = 1.0f / trig_freq_;
         if (since_last > trig_speed) {
           if ((target_trig_angle_ - trig_angle_) >
-              launcher::param::TRIGSTEP  * param_.jam_k) {
+              launcher::param::TRIGSTEP * param_.jam_k) {
             target_trig_angle_ -= launcher::param::TRIGSTEP;
           } else {
             target_trig_angle_ += launcher::param::TRIGSTEP;
@@ -475,13 +471,18 @@ class InfantryLauncher {
       } break;
       case LauncherEvent::SET_FRICMODE_READY: {
         /*  弹速闭环 */
-       if(last_bulllet_speed_ !=referee_data_.bullet_speed)
-        { if (referee_data_.bullet_speed > param_.target_bullet_speed-param_.bullet_speed_tolerance )
-        {this->expect_rpm_ -=70;}
+        if (last_bulllet_speed_ != referee_data_.bullet_speed) {
+          if (referee_data_.bullet_speed >
+              param_.target_bullet_speed - param_.bullet_speed_tolerance) {
+            this->expect_rpm_ -= 70;
+          }
 
-          if(referee_data_.bullet_speed < param_.target_bullet_speed-2.2f*param_.bullet_speed_tolerance )
-        {this->expect_rpm_ +=50;}
-        last_bulllet_speed_ = referee_data_.bullet_speed;
+          if (referee_data_.bullet_speed <
+              param_.target_bullet_speed -
+                  2.2f * param_.bullet_speed_tolerance) {
+            this->expect_rpm_ += 50;
+          }
+          last_bulllet_speed_ = referee_data_.bullet_speed;
         }
 
         target_rpm_ = expect_rpm_;
@@ -531,12 +532,11 @@ class InfantryLauncher {
     motor_control(motor_fric_1_, param_fric_1_, cmd_fric_1);
   }
 
- void Heat() {
+  void Heat() {
     /*每周期都计算此周期的使用热量*/
 
     heat_limit_.current_heat -= referee_data_.heat_cooling * dt_;
     heat_limit_.current_heat = std::max(0.0f, heat_limit_.current_heat);
-
 
     heat_limit_.current_heat += param_.single_heat * heat_limit_.launched_num;
     heat_limit_.launched_num = 0;
@@ -544,23 +544,27 @@ class InfantryLauncher {
     residuary_heat = referee_data_.heat_limit - heat_limit_.current_heat;
     /*不同剩余热量启用不同实际弹频*/
     if (residuary_heat > param_.single_heat) {
-      if (residuary_heat <= param_.single_heat*2) {
+      if (residuary_heat <= param_.single_heat * 2) {
         float max_freq = referee_data_.heat_cooling / param_.single_heat;
-        float ratio = (residuary_heat - param_.single_heat) / param_.single_heat;
+        float ratio =
+            (residuary_heat - param_.single_heat) / param_.single_heat;
         trig_freq_ = max_freq * (1.0f - ratio);
       } else if (residuary_heat <=
                  param_.single_heat * heat_limit_.heat_threshold) {
-        float safe_freq = referee_data_.heat_cooling / param_.single_heat / 1.2f;
+        float safe_freq =
+            referee_data_.heat_cooling / param_.single_heat / 1.2f;
         float ratio = (residuary_heat - param_.single_heat * 2) /
                       (param_.single_heat * (heat_limit_.heat_threshold - 2));
-        trig_freq_ = (ratio * (this->expect_trig_freq_ - safe_freq) + safe_freq) / 1.8f;
+        trig_freq_ =
+            (ratio * (this->expect_trig_freq_ - safe_freq) + safe_freq) / 1.8f;
 
       } else {
         trig_freq_ = (this->expect_trig_freq_);
-
       }
-    }else{trig_freq_ =0.00001;
-      last_trig_time_ = now_;  /*重置时间戳*/  }
+    } else {
+      trig_freq_ = 0.00001;
+      last_trig_time_ = now_; /*重置时间戳*/
+    }
   }
 
   void SetMode(uint32_t mode) {
@@ -662,7 +666,7 @@ class InfantryLauncher {
   float expect_rpm_ = param_.fric_setpoint_speed;
   float last_bulllet_speed_;
 
-  Referee *referee_;
+  Referee* referee_;
   uint16_t ui_step_ = 0;
   uint16_t ui_tick_ = 0;
 
@@ -693,25 +697,27 @@ class InfantryLauncher {
   }
 
   void DrawUI() {
-
     uint16_t robot_id = referee_->GetRobotID();
     uint16_t client_id = referee_->GetClientID(robot_id);
     Referee::UIFigureOp ADD_OP = Referee::UIFigureOp::UI_OP_MODIFY;
-    if(this->ui_tick_%4==0){ADD_OP = Referee::UIFigureOp::UI_OP_ADD;}
+    if (this->ui_tick_ % 4 == 0) {
+      ADD_OP = Referee::UIFigureOp::UI_OP_ADD;
+    }
 
+    auto fircl_color = (fabsf(param_fric_0_.velocity) > 5000.0f)
+                           ? Referee::UIColor::UI_COLOR_CYAN
+                           : Referee::UIColor::UI_COLOR_ORANGE;
 
-     auto fircl_color = (fabsf(param_fric_0_.velocity)>5000.0f)
-      ?Referee::UIColor::UI_COLOR_CYAN:Referee::UIColor::UI_COLOR_ORANGE;
+    auto fircr_color = (fabsf(param_fric_1_.velocity) > 5000.0f)
+                           ? Referee::UIColor::UI_COLOR_CYAN
+                           : Referee::UIColor::UI_COLOR_ORANGE;
 
-     auto fircr_color = (fabsf(param_fric_1_.velocity)>5000.0f)
-      ?Referee::UIColor::UI_COLOR_CYAN:Referee::UIColor::UI_COLOR_ORANGE;
+    float trig_pos =
+        LibXR::CycleValue<float>(this->trig_angle_) / 6.2832f * 360.0f;
 
-
-    float trig_pos =LibXR::CycleValue<float>(this->trig_angle_)/6.2832f*360.0f;
-
-    uint16_t arc_mid   = static_cast<uint16_t>(trig_pos);
+    uint16_t arc_mid = static_cast<uint16_t>(trig_pos);
     uint16_t arc_start = static_cast<uint16_t>((arc_mid + 345) % 360);
-    uint16_t arc_end   = static_cast<uint16_t>((arc_mid + 15) % 360);
+    uint16_t arc_end = static_cast<uint16_t>((arc_mid + 15) % 360);
     if (arc_start >= arc_end) arc_end += 360;
 
     auto trig_color = (trig_mod_ == TRIGMODE::CALI)
@@ -721,28 +727,25 @@ class InfantryLauncher {
     switch (ui_step_) {
       case 0: {
         Referee::UIFigure2 fig{};
-        referee_->FillCircle(fig.interaction_figure[0], "lfl",
-                             ADD_OP, UI_LAUNCHER_LAYER,
-                             fircl_color, 5, 1700, 600, 25);
-        referee_->FillCircle(fig.interaction_figure[1], "lfr",
-                             ADD_OP, UI_LAUNCHER_LAYER,
-                             fircr_color, 5, 1750, 600, 25);
+        referee_->FillCircle(fig.interaction_figure[0], "lfl", ADD_OP,
+                             UI_LAUNCHER_LAYER, fircl_color, 5, 1700, 600, 25);
+        referee_->FillCircle(fig.interaction_figure[1], "lfr", ADD_OP,
+                             UI_LAUNCHER_LAYER, fircr_color, 5, 1750, 600, 25);
         referee_->SendUIFigure2(robot_id, client_id, fig);
         break;
       }
       case 1: {
         Referee::UIFigure fig{};
-        referee_->FillArc(fig, "lta",
-                          ADD_OP, UI_LAUNCHER_LAYER,
-                          trig_color, 4, 1700, 750, arc_start, arc_end, 80, 80);
+        referee_->FillArc(fig, "lta", ADD_OP, UI_LAUNCHER_LAYER, trig_color, 4,
+                          1700, 750, arc_start, arc_end, 80, 80);
         referee_->SendUIFigure(robot_id, client_id, fig);
-        this->ui_tick_ +=1;
+        this->ui_tick_ += 1;
         break;
       }
       default:
         break;
     }
 
-    this->ui_step_ = (this->ui_step_+1) % 2;
+    this->ui_step_ = (this->ui_step_ + 1) % 2;
   }
 };
