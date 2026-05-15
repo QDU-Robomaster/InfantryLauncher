@@ -852,4 +852,57 @@ class InfantryLauncher {
       out_fric_1 /= 50;
     }
   }
+
+  void DrawUI() {
+    uint16_t robot_id = referee_->GetRobotID();
+    uint16_t client_id = referee_->GetClientID(robot_id);
+    Referee::UIFigureOp ADD_OP = Referee::UIFigureOp::UI_OP_MODIFY;
+    if (this->ui_tick_ % 4 == 0) {
+      ADD_OP = Referee::UIFigureOp::UI_OP_ADD;
+    }
+
+    auto fircl_color = (fabsf(param_fric_0_.velocity) > 5000.0f)
+                           ? Referee::UIColor::UI_COLOR_CYAN
+                           : Referee::UIColor::UI_COLOR_ORANGE;
+
+    auto fircr_color = (fabsf(param_fric_1_.velocity) > 5000.0f)
+                           ? Referee::UIColor::UI_COLOR_CYAN
+                           : Referee::UIColor::UI_COLOR_ORANGE;
+
+    float trig_pos =
+        LibXR::CycleValue<float>(this->trig_angle_) / 6.2832f * 360.0f;
+
+    uint16_t arc_mid = static_cast<uint16_t>(trig_pos);
+    uint16_t arc_start = static_cast<uint16_t>((arc_mid + 345) % 360);
+    uint16_t arc_end = static_cast<uint16_t>((arc_mid + 15) % 360);
+    if (arc_start >= arc_end) arc_end += 360;
+
+    auto trig_color = (trig_mod_ == TRIGMODE::CALI)
+                          ? Referee::UIColor::UI_COLOR_ORANGE
+                          : Referee::UIColor::UI_COLOR_CYAN;
+
+    switch (ui_step_) {
+      case 0: {
+        Referee::UIFigure2 fig{};
+        referee_->FillCircle(fig.interaction_figure[0], "lfl", ADD_OP,
+                             UI_LAUNCHER_LAYER, fircl_color, 5, 1700, 600, 25);
+        referee_->FillCircle(fig.interaction_figure[1], "lfr", ADD_OP,
+                             UI_LAUNCHER_LAYER, fircr_color, 5, 1750, 600, 25);
+        referee_->SendUIFigure2(robot_id, client_id, fig);
+        break;
+      }
+      case 1: {
+        Referee::UIFigure fig{};
+        referee_->FillArc(fig, "lta", ADD_OP, UI_LAUNCHER_LAYER, trig_color, 4,
+                          1700, 750, arc_start, arc_end, 80, 80);
+        referee_->SendUIFigure(robot_id, client_id, fig);
+        this->ui_tick_ += 1;
+        break;
+      }
+      default:
+        break;
+    }
+
+    this->ui_step_ = (this->ui_step_ + 1) % 2;
+  }
 };
