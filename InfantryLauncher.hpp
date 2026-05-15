@@ -107,6 +107,7 @@ class InfantryLauncher {
     SET_FRICMODE_READY,
     SET_SHOTMODE_SINGLE,
     SET_SHOTMODE_TRIPLE,
+    SET_SHOTMODE_BOOST,
   };
 
   enum class TrigMode : uint8_t {
@@ -225,6 +226,10 @@ class InfantryLauncher {
     launcher_event.Register(
         static_cast<uint32_t>(LauncherEvent::SET_SHOTMODE_TRIPLE),
         event_callback);
+            launcher_event.Register(
+        static_cast<uint32_t>(LauncherEvent::SET_SHOTMODE_BOOST),
+        event_callback);
+
   }
 
   static void ThreadFunc(InfantryLauncher* self) {
@@ -355,6 +360,7 @@ class InfantryLauncher {
       case LauncherEvent::SET_SHOTMODE_SINGLE:
         shot_count_ = 1;
         return;
+      case LauncherEvent::SET_SHOTMODE_BOOST:
       case LauncherEvent::SET_SHOTMODE_TRIPLE:
         shot_count_ = 3;
         return;
