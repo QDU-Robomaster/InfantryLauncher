@@ -4,9 +4,9 @@
 /* === MODULE MANIFEST V2 ===
 module_description: No description provided
 constructor_args:
-  - motor_fric_front_left: '@&motor_fric_0'
-  - motor_fric_front_right: '@&motor_fric_1'
-  - motor_trig: '@&motor_trig'
+  - motor_fric_front_left: '@nullptr'
+  - motor_fric_front_right: '@nullptr'
+  - motor_trig: '@nullptr'
   - task_stack_depth: 4096
   - pid_trig_angle:
       k: 1.0
@@ -46,7 +46,7 @@ constructor_args:
       bullet_speed_tolerance: 1.5
       trig_gear_ratio: 36.0
       num_trig_tooth: 10
-  - cmd: '@&cmd'
+  - cmd: '@nullptr'
   - referee: '@nullptr'
   - thread_priority: LibXR::Thread::Priority::HIGH
 required_hardware:
@@ -55,6 +55,8 @@ required_hardware:
 depends:
   - qdu-future/CMD
   - qdu-future/RMMotor
+  - qdu-future/Motor
+  - qdu-future/Referee
 === END MANIFEST === */
 // clang-format on
 
@@ -167,6 +169,11 @@ class InfantryLauncher {
         referee_(referee) {
     UNUSED(hw);
     UNUSED(app);
+
+    ASSERT(cmd != nullptr);
+    ASSERT(motor_fric_0_ != nullptr);
+    ASSERT(motor_fric_1_ != nullptr);
+    ASSERT(motor_trig_ != nullptr);
 
     thread_.Create(this, ThreadFunc, "LauncherThread", task_stack_depth,
                    thread_priority);
