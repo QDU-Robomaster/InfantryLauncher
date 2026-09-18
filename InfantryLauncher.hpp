@@ -111,26 +111,35 @@ class InfantryLauncher
     float merge;
   };
 
-  InfantryLauncher(
+  struct Param
+  {
+    uint32_t task_stack_depth;
+    LibXR::PID<float>::Param pid_param_trig_angle;
+    LibXR::PID<float>::Param pid_param_trig_speed;
+    LibXR::PID<float>::Param pid_param_fric_speed_0;
+    LibXR::PID<float>::Param pid_param_fric_speed_1;
+    LauncherParam launcher_param;
+    LibXR::Thread::Priority thread_priority;
+  };
 
-      RMMotor* motor_fric_0, RMMotor* motor_fric_1, RMMotor* motor_trig,
-      uint32_t task_stack_depth, LibXR::PID<float>::Param pid_param_trig_angle,
-      LibXR::PID<float>::Param pid_param_trig_speed,
-      LibXR::PID<float>::Param pid_param_fric_speed_0,
-      LibXR::PID<float>::Param pid_param_fric_speed_1, LauncherParam launcher_param,
-      CMD* cmd, Referee* referee = nullptr,
-      LibXR::Thread::Priority thread_priority = LibXR::Thread::Priority::HIGH)
-      : motor_fric_0_(motor_fric_0),
-        motor_fric_1_(motor_fric_1),
-        motor_trig_(motor_trig),
-        pid_trig_angle_(pid_param_trig_angle),
-        pid_trig_sp_(pid_param_trig_speed),
-        pid_fric_0_(pid_param_fric_speed_0),
-        pid_fric_1_(pid_param_fric_speed_1),
-        param_(launcher_param),
+  InfantryLauncher(
+      RMMotor& motor_fric_0,
+      RMMotor& motor_fric_1,
+      RMMotor& motor_trig,
+      CMD& cmd,
+      Referee* referee = nullptr,
+      const Param& param = {.task_stack_depth = 4096, .pid_param_trig_angle = {.k = 1.0f, .p = 4000.0f, .i = 0.0f, .d = 0.0f, .i_limit = 0.0f, .out_limit = 4000.0f, .cycle = false}, .pid_param_trig_speed = {.k = 1.0f, .p = 0.0012f, .i = 0.0005f, .d = 0.0f, .i_limit = 1.0f, .out_limit = 1.0f, .cycle = false}, .pid_param_fric_speed_0 = {.k = 1.0f, .p = 0.002f, .i = 0.0f, .d = 0.0f, .i_limit = 0.0f, .out_limit = 1.0f, .cycle = false}, .pid_param_fric_speed_1 = {.k = 1.0f, .p = 0.002f, .i = 0.0f, .d = 0.0f, .i_limit = 0.0f, .out_limit = 1.0f, .cycle = false}, .launcher_param = {.fric1_setpoint_speed = 6500.0f, .target_bullet_speed = 25.0f, .bullet_speed_tolerance = 1.5f, .trig_gear_ratio = 36.0f, .num_trig_tooth = 10}, .thread_priority = LibXR::Thread::Priority::HIGH})
+      : motor_fric_0_(&motor_fric_0),
+        motor_fric_1_(&motor_fric_1),
+        motor_trig_(&motor_trig),
+        pid_trig_angle_(param.pid_param_trig_angle),
+        pid_trig_sp_(param.pid_param_trig_speed),
+        pid_fric_0_(param.pid_param_fric_speed_0),
+        pid_fric_1_(param.pid_param_fric_speed_1),
+        param_(param.launcher_param),
         referee_(referee)
   {
-    thread_.Create(this, ThreadFunc, "LauncherThread", task_stack_depth, thread_priority);
+    thread_.Create(this, ThreadFunc, "LauncherThread", param.task_stack_depth, param.thread_priority);
 
     if (referee_ != nullptr)
     {
@@ -161,8 +170,8 @@ class InfantryLauncher
         },
         this);
 
-    cmd->GetEvent().Register(CMD::CMD_EVENT_LOST_CTRL, lost_ctrl_callback);
-    cmd->GetEvent().Register(CMD::CMD_EVENT_START_CTRL, start_ctrl_callback);
+    cmd.GetEvent().Register(CMD::CMD_EVENT_LOST_CTRL, lost_ctrl_callback);
+    cmd.GetEvent().Register(CMD::CMD_EVENT_START_CTRL, start_ctrl_callback);
 
     auto event_callback = LibXR::Callback<uint32_t>::Create(
         [](bool in_isr, InfantryLauncher* self, uint32_t event_id)
