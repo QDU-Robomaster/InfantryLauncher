@@ -398,8 +398,6 @@ class InfantryLauncher
 
   LibXR::Event& GetEvent() { return launcher_event; }
 
-  void OnMonitor() {}
-
   CMD::LauncherCMD launcher_cmd_{};  // NOLINT
   RefereeData ref_data_;
 
