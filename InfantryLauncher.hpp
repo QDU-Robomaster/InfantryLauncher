@@ -127,7 +127,7 @@ class InfantryLauncher
       RMMotor& motor_fric_1,
       RMMotor& motor_trig,
       CMD& cmd,
-      Referee* referee = nullptr,
+      Referee* referee,
       const Param& param = {.task_stack_depth = 4096, .pid_param_trig_angle = {.k = 1.0f, .p = 4000.0f, .i = 0.0f, .d = 0.0f, .i_limit = 0.0f, .out_limit = 4000.0f, .cycle = false}, .pid_param_trig_speed = {.k = 1.0f, .p = 0.0012f, .i = 0.0005f, .d = 0.0f, .i_limit = 1.0f, .out_limit = 1.0f, .cycle = false}, .pid_param_fric_speed_0 = {.k = 1.0f, .p = 0.002f, .i = 0.0f, .d = 0.0f, .i_limit = 0.0f, .out_limit = 1.0f, .cycle = false}, .pid_param_fric_speed_1 = {.k = 1.0f, .p = 0.002f, .i = 0.0f, .d = 0.0f, .i_limit = 0.0f, .out_limit = 1.0f, .cycle = false}, .launcher_param = {.fric1_setpoint_speed = 6500.0f, .target_bullet_speed = 25.0f, .bullet_speed_tolerance = 1.5f, .trig_gear_ratio = 36.0f, .num_trig_tooth = 10}, .thread_priority = LibXR::Thread::Priority::HIGH})
       : motor_fric_0_(&motor_fric_0),
         motor_fric_1_(&motor_fric_1),
