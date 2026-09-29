@@ -38,8 +38,8 @@ Topic：
 
 | Topic | 方向 | 类型 | 说明 |
 | --- | --- | --- | --- |
-| `launcher_cmd` | 订阅 | `CMD::LauncherCMD` | 发射命令 `isfire` |
-| `launcher_ref` | 订阅 | `Referee::LauncherPack` | 热量上限、冷却值、17 mm 热量、弹速 |
+| `param.launcher_cmd_topic_name`（默认 `launcher_cmd`） | 订阅 | `CMD::LauncherCMD` | 发射命令 `isfire` |
+| `param.launcher_ref_topic_name`（默认 `launcher_ref`） | 订阅 | `Referee::LauncherPack` | 热量上限、冷却值、17 mm 热量、弹速 |
 
 ## 依赖
 
@@ -67,7 +67,7 @@ InfantryLauncher(RMMotor& motor_fric_0,
 - `motor_trig`：`RMMotor`，拨弹电机。
 - `cmd`：`CMD` 实例。
 - `referee`：`Referee*`，只用于 UI 绘制；填 `nullptr` 时不绘制 UI。热量与弹速数据来自
-  `launcher_ref` Topic，与此参数无关。
+  `launcher_ref_topic_name` 指定的 Topic，与此参数无关。
 
 配置（`Param`；PID 为 `LibXR::PID<float>::Param`，字段 `k, p, i, d, i_limit, out_limit, cycle`）：
 
@@ -81,6 +81,10 @@ InfantryLauncher(RMMotor& motor_fric_0,
 - `launcher_param.trig_gear_ratio`：拨弹电机减速比，默认 36。
 - `launcher_param.num_trig_tooth`：拨弹盘齿数，只用于拨弹速度参考限幅，默认 10。
 - `thread_priority`：线程优先级，默认 `HIGH`。
+- `launcher_cmd_topic_name`：订阅的发射控制命令 Topic，默认 `"launcher_cmd"`，须与 CMD 的
+  `launcher_cmd_topic_name` 一致。
+- `launcher_ref_topic_name`：订阅的裁判系统发射数据 Topic，默认 `"launcher_ref"`，须与
+  Referee 的 `referee_launcher_tp_name` 一致。
 
 ## 使用
 
@@ -144,6 +148,8 @@ modules:
             trig_gear_ratio: 36.0f
             num_trig_tooth: '10'
           thread_priority: LibXR::Thread::Priority::HIGH
+          launcher_cmd_topic_name: '"launcher_cmd"'
+          launcher_ref_topic_name: '"launcher_ref"'
 ```
 
 所有依赖都是其他模块实例的 id，须在本实例之前列出：`motor_fric_0`、`motor_fric_1`、`motor_trig`
