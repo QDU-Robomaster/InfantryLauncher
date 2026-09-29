@@ -120,6 +120,8 @@ class InfantryLauncher
     LibXR::PID<float>::Param pid_param_fric_speed_1;
     LauncherParam launcher_param;
     LibXR::Thread::Priority thread_priority;
+    const char* launcher_cmd_topic_name;  ///< 订阅的发射控制命令 Topic 名称
+    const char* launcher_ref_topic_name;  ///< 订阅的裁判系统发射数据 Topic 名称
   };
 
   InfantryLauncher(
@@ -128,7 +130,7 @@ class InfantryLauncher
       RMMotor& motor_trig,
       CMD& cmd,
       Referee* referee,
-      const Param& param = {.task_stack_depth = 4096, .pid_param_trig_angle = {.k = 1.0f, .p = 4000.0f, .i = 0.0f, .d = 0.0f, .i_limit = 0.0f, .out_limit = 4000.0f, .cycle = false}, .pid_param_trig_speed = {.k = 1.0f, .p = 0.0012f, .i = 0.0005f, .d = 0.0f, .i_limit = 1.0f, .out_limit = 1.0f, .cycle = false}, .pid_param_fric_speed_0 = {.k = 1.0f, .p = 0.002f, .i = 0.0f, .d = 0.0f, .i_limit = 0.0f, .out_limit = 1.0f, .cycle = false}, .pid_param_fric_speed_1 = {.k = 1.0f, .p = 0.002f, .i = 0.0f, .d = 0.0f, .i_limit = 0.0f, .out_limit = 1.0f, .cycle = false}, .launcher_param = {.fric1_setpoint_speed = 6500.0f, .target_bullet_speed = 25.0f, .bullet_speed_tolerance = 1.5f, .trig_gear_ratio = 36.0f, .num_trig_tooth = 10}, .thread_priority = LibXR::Thread::Priority::HIGH})
+      const Param& param = {.task_stack_depth = 4096, .pid_param_trig_angle = {.k = 1.0f, .p = 4000.0f, .i = 0.0f, .d = 0.0f, .i_limit = 0.0f, .out_limit = 4000.0f, .cycle = false}, .pid_param_trig_speed = {.k = 1.0f, .p = 0.0012f, .i = 0.0005f, .d = 0.0f, .i_limit = 1.0f, .out_limit = 1.0f, .cycle = false}, .pid_param_fric_speed_0 = {.k = 1.0f, .p = 0.002f, .i = 0.0f, .d = 0.0f, .i_limit = 0.0f, .out_limit = 1.0f, .cycle = false}, .pid_param_fric_speed_1 = {.k = 1.0f, .p = 0.002f, .i = 0.0f, .d = 0.0f, .i_limit = 0.0f, .out_limit = 1.0f, .cycle = false}, .launcher_param = {.fric1_setpoint_speed = 6500.0f, .target_bullet_speed = 25.0f, .bullet_speed_tolerance = 1.5f, .trig_gear_ratio = 36.0f, .num_trig_tooth = 10}, .thread_priority = LibXR::Thread::Priority::HIGH, .launcher_cmd_topic_name = "launcher_cmd", .launcher_ref_topic_name = "launcher_ref"})
       : motor_fric_0_(&motor_fric_0),
         motor_fric_1_(&motor_fric_1),
         motor_trig_(&motor_trig),
@@ -139,6 +141,8 @@ class InfantryLauncher
         param_(param.launcher_param),
         referee_(referee)
   {
+    launcher_cmd_topic_name_ = param.launcher_cmd_topic_name;
+    launcher_ref_topic_name_ = param.launcher_ref_topic_name;
     thread_.Create(this, ThreadFunc, "LauncherThread", param.task_stack_depth, param.thread_priority);
 
     if (referee_ != nullptr)
@@ -198,8 +202,9 @@ class InfantryLauncher
 
   static void ThreadFunc(InfantryLauncher* self)
   {
-    LibXR::Topic::ASyncSubscriber<CMD::LauncherCMD> cmd_sub("launcher_cmd");
-    LibXR::Topic::ASyncSubscriber<Referee::LauncherPack> launcher_ref("launcher_ref");
+    LibXR::Topic::ASyncSubscriber<CMD::LauncherCMD> cmd_sub(self->launcher_cmd_topic_name_);
+    LibXR::Topic::ASyncSubscriber<Referee::LauncherPack> launcher_ref(
+        self->launcher_ref_topic_name_);
     cmd_sub.StartWaiting();
     launcher_ref.StartWaiting();
     self->last_online_time_ = LibXR::Timebase::GetMicroseconds();
@@ -443,6 +448,8 @@ class InfantryLauncher
   LauncherParam param_;
   Referee* referee_ = nullptr;
   LibXR::Event launcher_event;
+  const char* launcher_cmd_topic_name_ = nullptr;
+  const char* launcher_ref_topic_name_ = nullptr;
   LibXR::Thread thread_;
   LibXR::Timer::TimerHandle timer_ui_{};
   uint8_t robot_level_ = 5;
