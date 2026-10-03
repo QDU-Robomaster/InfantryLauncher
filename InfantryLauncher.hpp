@@ -39,91 +39,176 @@ depends:
 
 namespace launcher::param
 {
+/// 拨弹盘每发转过的角度 (rad)
+/// Angle the trigger disc advances per round (rad)
 constexpr float TRIG_STEP = static_cast<float>(LibXR::TWO_PI) / 10.0f;
+/// 判定卡弹的拨弹电机扭矩 (N·m)
+/// Trigger motor torque that is taken as a jam (N·m)
 constexpr float JAM_TORQUE = 0.028f;
+/// 卡弹处理中后退与复位的切换间隔 (s)
+/// Switching interval between backing off and returning during jam handling (s)
 constexpr float JAM_TOGGLE_INTERVAL_SEC = 0.1f;
+/// 按住超过该时间转为连发 (s)
+/// Holding for longer than this switches to continuous fire (s)
 constexpr float LONG_PRESS_THRESHOLD_SEC = 0.5f;
+/// 热量控制的更新周期 (s)
+/// Update period of the heat control (s)
 constexpr float HEAT_TICK_SEC = 0.05f;
+/// 发射进度判定的容差
+/// Tolerance of the shot progress decision
 constexpr float SHOT_PROGRESS_EPSILON = 1e-4f;
+/// 拨弹盘到位判定的角度容差 (rad)
+/// Angle tolerance for the trigger disc reaching its target (rad)
 constexpr float TRIGGER_SETTLE_ANGLE = 0.2f * TRIG_STEP;
+/// 允许发射的摩擦轮转速相对目标的余量 (rpm)
+/// Margin below the target speed of the friction wheels that still allows firing (rpm)
 constexpr float FRIC_READY_RPM_MARGIN = 200.0f;
+/// 判定出弹的摩擦轮转速相对峰值的下降量 (rpm)
+/// Friction wheel speed drop from the peak that is taken as a round leaving (rpm)
 constexpr float FRIC_DROP_RPM = 150.0f;
 }  // namespace launcher::param
 
 /**
- * @brief 步兵发射机构实现
- * @details 负责摩擦轮、拨弹盘控制与热量约束发射逻辑。
+ * @brief 步兵发射机构模块：控制两个摩擦轮和一个拨弹盘，支持单发、三连发和连发，
+ *        按裁判系统热量限制射频。
+ *        Infantry launcher Module controlling two friction wheels and a trigger disc,
+ *        with single, three-round and continuous fire and a fire rate limited by the
+ *        referee system heat.
  */
 class InfantryLauncher
 {
  public:
+  /**
+   * @brief 发射状态。
+   *        Launcher states.
+   */
   enum class LauncherState : uint8_t
   {
-    RELAX,
-    STOP,
-    NORMAL,
-    JAMMED,
+    RELAX,   ///< 放松 Relax
+    STOP,    ///< 停止发射 Firing stopped
+    NORMAL,  ///< 正常发射 Normal firing
+    JAMMED,  ///< 卡弹 Jammed
   };
 
+  /**
+   * @brief 发射机构事件，数值同时是 `GetEvent()` 上注册的事件 ID。
+   *        Launcher events; the values are also the event IDs registered on
+   *        `GetEvent()`.
+   */
   enum class LauncherEvent : uint8_t
   {
-    SET_FRICMODE_RELAX,
-    SET_FRICMODE_SAFE,
-    SET_FRICMODE_READY,
-    SET_SHOTMODE_SINGLE,
-    SET_SHOTMODE_CONTINUE,
-    SET_SHOTMODE_BOOST_3,
+    SET_FRICMODE_RELAX,  ///< 摩擦轮放松 Friction wheels relaxed
+    SET_FRICMODE_SAFE,  ///< 摩擦轮安全：目标转速为 0 Friction wheels safe: target speed 0
+    SET_FRICMODE_READY,     ///< 摩擦轮就绪 Friction wheels ready
+    SET_SHOTMODE_SINGLE,    ///< 单发 Single shot
+    SET_SHOTMODE_CONTINUE,  ///< 连发 Continuous fire
+    SET_SHOTMODE_BOOST_3,   ///< 三连发 Three-round burst
   };
 
+  /**
+   * @brief 拨弹模式。
+   *        Trigger modes.
+   */
   enum class TrigMode : uint8_t
   {
-    RELAX,
-    SAFE,
-    SINGLE,
-    CONTINUE,
-    JAM,
+    RELAX,     ///< 放松 Relax
+    SAFE,      ///< 安全：保持当前位置 Safe: hold the current position
+    SINGLE,    ///< 单发 Single shot
+    CONTINUE,  ///< 连发 Continuous fire
+    JAM,       ///< 卡弹处理 Jam handling
   };
 
+  /**
+   * @brief 裁判系统回传的发射相关数据。
+   *        Launcher-related data reported by the referee system.
+   */
   struct RefereeData
   {
-    float cooling_rate = 0.0f;
-    float heat_limit = 0.0f;
-    float current_heat_17 = 0.0f;
-    float bullet_speed = 0.0f;
+    float cooling_rate = 0.0f;     ///< 枪管冷却值 Barrel cooling value
+    float heat_limit = 0.0f;       ///< 枪管热量上限 Barrel heat limit
+    float current_heat_17 = 0.0f;  ///< 17 mm 枪管当前热量 Current 17 mm barrel heat
+    float bullet_speed = 0.0f;     ///< 弹速 (m/s) Bullet speed (m/s)
   };
 
+  /**
+   * @brief 发射器参数。
+   *        Launcher parameters.
+   */
   struct LauncherParam
   {
-    float fric1_setpoint_speed;
-    float target_bullet_speed;
-    float bullet_speed_tolerance;
-    float trig_gear_ratio;
-    uint8_t num_trig_tooth;
+    float fric1_setpoint_speed;    ///< 摩擦轮目标转速初值 (rpm)
+                                   ///< Initial friction wheel target speed (rpm)
+    float target_bullet_speed;     ///< 目标弹速 (m/s) Target bullet speed (m/s)
+    float bullet_speed_tolerance;  ///< 弹速容差 (m/s) Bullet speed tolerance (m/s)
+    float trig_gear_ratio;         ///< 拨弹电机减速比 Trigger motor reduction ratio
+    uint8_t num_trig_tooth;        ///< 拨弹盘齿数，用于拨弹速度参考限幅
+                                   ///< Number of trigger disc teeth, used for the
+                                   ///< trigger speed reference limit
   };
 
+  /**
+   * @brief 热量控制状态。
+   *        Heat control state.
+   */
   struct HeatLimit
   {
-    float single_heat;
-    float launched_num;
-    float current_heat;
-    float heat_threshold;
-    bool allow_fire;
-    float merge;
+    float single_heat;     ///< 单发热量 Heat per round
+    float launched_num;    ///< 本次更新判定的发射数 Rounds counted in this update
+    float current_heat;    ///< 本地估计的当前热量 Locally estimated current heat
+    float heat_threshold;  ///< 开始降低射频的剩余热量，以单发热量为单位
+                           ///< Remaining heat at which the fire rate starts to drop, in
+                           ///< units of the heat per round
+    bool allow_fire;       ///< 是否允许发射 Whether firing is allowed
+    float merge;           ///< 热量余量 Heat margin
   };
 
+  /**
+   * @brief 步兵发射机构配置参数。
+   *        Infantry launcher configuration parameters.
+   */
   struct Param
   {
-    uint32_t task_stack_depth;
-    LibXR::PID<float>::Param pid_param_trig_angle;
-    LibXR::PID<float>::Param pid_param_trig_speed;
-    LibXR::PID<float>::Param pid_param_fric_speed_0;
-    LibXR::PID<float>::Param pid_param_fric_speed_1;
-    LauncherParam launcher_param;
-    LibXR::Thread::Priority thread_priority;
-    const char* launcher_cmd_topic_name;  ///< 订阅的发射控制命令 Topic 名称
-    const char* launcher_ref_topic_name;  ///< 订阅的裁判系统发射数据 Topic 名称
+    uint32_t task_stack_depth;                        ///< 线程栈深
+                                                      ///< Thread stack depth
+    LibXR::PID<float>::Param pid_param_trig_angle;    ///< 拨弹角度环 PID
+                                                      ///< Trigger angle-loop PID
+    LibXR::PID<float>::Param pid_param_trig_speed;    ///< 拨弹速度环 PID
+                                                      ///< Trigger speed-loop PID
+    LibXR::PID<float>::Param pid_param_fric_speed_0;  ///< 摩擦轮 0 速度环 PID
+                                                      ///< Friction wheel 0 speed-loop PID
+    LibXR::PID<float>::Param pid_param_fric_speed_1;  ///< 摩擦轮 1 速度环 PID
+                                                      ///< Friction wheel 1 speed-loop PID
+    LauncherParam launcher_param;                     ///< 发射器参数
+                                                      ///< Launcher parameters
+    LibXR::Thread::Priority thread_priority;          ///< 线程优先级
+                                                      ///< Thread priority
+    const char* launcher_cmd_topic_name;              ///< 订阅的发射控制命令 Topic 名称
+                                                      ///< Name of the subscribed launcher
+                                                      ///< command Topic
+    const char* launcher_ref_topic_name;              ///< 订阅的裁判发射数据 Topic 名称
+                                                      ///< Name of the subscribed referee
+                                                      ///< launcher data Topic
   };
 
+  /**
+   * @brief 构造 InfantryLauncher，创建控制线程与 UI 定时任务并注册事件。
+   *        Construct InfantryLauncher, create the control thread and the UI timer task,
+   *        and register the events.
+   *
+   * @param motor_fric_0 摩擦轮 0 电机。
+   *                     Friction wheel 0 motor.
+   * @param motor_fric_1 摩擦轮 1 电机。
+   *                     Friction wheel 1 motor.
+   * @param motor_trig 拨弹电机。
+   *                   Trigger motor.
+   * @param cmd CMD 实例。
+   *            CMD instance.
+   * @param referee Referee 实例指针，用于 UI 绘制，为 `nullptr` 时不创建 UI 定时任务。
+   *                Pointer to a Referee instance for UI drawing; the UI timer task is
+   *                created only when it is not `nullptr`.
+   * @param param 配置参数。
+   *              Configuration parameters.
+   */
   InfantryLauncher(
       RMMotor& motor_fric_0,
       RMMotor& motor_fric_1,
@@ -200,6 +285,14 @@ class InfantryLauncher
                             event_callback);
   }
 
+  /**
+   * @brief 控制线程函数：订阅发射命令与裁判系统数据，每 2 ms 执行一轮更新与控制。
+   *        Control thread function that subscribes to the launcher command and the
+   *        referee data and runs one update and control iteration every 2 ms.
+   *
+   * @param self InfantryLauncher 实例指针。
+   *             Pointer to the InfantryLauncher instance.
+   */
   static void ThreadFunc(InfantryLauncher* self)
   {
     LibXR::Topic::ASyncSubscriber<CMD::LauncherCMD> cmd_sub(self->launcher_cmd_topic_name_);
@@ -238,6 +331,11 @@ class InfantryLauncher
     }
   }
 
+  /**
+   * @brief 刷新电机反馈、累加拨弹盘角度并更新发射状态。
+   *        Refresh the motor feedback, accumulate the trigger disc angle and update the
+   *        launcher state.
+   */
   void Update()
   {
     motor_fric_0_->Update();
@@ -257,6 +355,12 @@ class InfantryLauncher
     UpdateLauncherState();
   }
 
+  /**
+   * @brief 计算拨弹与摩擦轮的 PID 输出并以 `MODE_CURRENT`
+   * 下发；摩擦轮放松时放松全部电机。 Compute the PID outputs of the trigger and the
+   * friction wheels and send them in `MODE_CURRENT`; all motors are relaxed when the
+   * friction wheels are relaxed.
+   */
   void Control()
   {
     float out_fric_0 = 0.0f;
@@ -326,6 +430,13 @@ class InfantryLauncher
     motor_control(motor_fric_1_, fric_1_fb, cmd_fric_1);
   }
 
+  /**
+   * @brief 切换摩擦轮模式或射击模式。
+   *        Switch the friction wheel mode or the shot mode.
+   *
+   * @param mode `LauncherEvent` 的数值。
+   *             Value of `LauncherEvent`.
+   */
   void SetMode(uint32_t mode)
   {
     auto event = static_cast<LauncherEvent>(mode);
@@ -371,6 +482,11 @@ class InfantryLauncher
     pid_trig_sp_.Reset();
   }
 
+  /**
+   * @brief 失去控制时复位全部状态，失能拨弹电机并放松摩擦轮。
+   *        Reset all states when control is lost, disable the trigger motor and relax the
+   *        friction wheels.
+   */
   void LostCtrl()
   {
     launcher_event_ = LauncherEvent::SET_FRICMODE_RELAX;
@@ -401,10 +517,19 @@ class InfantryLauncher
     motor_fric_1_->Relax();
   }
 
+  /**
+   * @brief 获取发射机构事件对象，`LauncherEvent` 的各个值注册在其上。
+   *        Get the launcher event object on which every value of `LauncherEvent` is
+   *        registered.
+   *
+   * @return 事件对象的引用。
+   *         Reference to the event object.
+   */
   LibXR::Event& GetEvent() { return launcher_event; }
 
-  CMD::LauncherCMD launcher_cmd_{};  // NOLINT
-  RefereeData ref_data_;
+  CMD::LauncherCMD launcher_cmd_{};  ///< 最近一次发射命令 Latest fire command  // NOLINT
+  RefereeData
+      ref_data_;  ///< 裁判系统回传的发射数据 Launcher data from the referee system
 
  private:
   // 发射机构 UI 使用的图层编号
