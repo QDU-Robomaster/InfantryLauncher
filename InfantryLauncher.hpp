@@ -2,7 +2,7 @@
 
 // clang-format off
 /* === MODULE MANIFEST V2 ===
-module_description: No description provided
+module_description: 步兵发射机构模块：控制两个摩擦轮和一个拨弹盘，支持单发、三连发和连发，按裁判系统热量限制射频 / Infantry launcher Module controlling two friction wheels and a trigger disc, with single, three-round and continuous fire and a fire rate limited by the referee system heat
 depends:
 - id: QDU-Robomaster/CMD
   ref: same-or-dev
