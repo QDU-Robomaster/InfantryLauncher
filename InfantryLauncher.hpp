@@ -814,7 +814,8 @@ class InfantryLauncher
       const float current_heat =
           std::max(heat_limit_.current_heat, ref_data_.current_heat_17);
       const float shot_heat = heat_limit_.single_heat * static_cast<float>(shot_count_);
-      if (ref_data_.heat_limit <= 0.0f ||
+      // Test build: without referee data (heat_limit 0) the heat limit is ignored.
+      if (ref_data_.heat_limit > 0.0f &&
           current_heat + shot_heat + heat_limit_.merge > ref_data_.heat_limit)
       {
         return;
@@ -950,6 +951,14 @@ class InfantryLauncher
       return;
     }
     last_heat_time_ = now;
+
+    // Test build: without referee data (heat_limit 0) fire at the expected rate.
+    if (ref_data_.heat_limit <= 0.0f)
+    {
+      heat_limit_.allow_fire = true;
+      trig_freq_ = expect_trig_freq_;
+      return;
+    }
 
     float current_heat = std::max(heat_limit_.current_heat, ref_data_.current_heat_17);
     float residuary_heat = ref_data_.heat_limit - current_heat - heat_limit_.merge;
