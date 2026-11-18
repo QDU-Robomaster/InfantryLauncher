@@ -20,6 +20,7 @@ depends:
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
+#include <optional>
 
 #include "CMD.hpp"
 #include "Motor.hpp"
@@ -146,6 +147,12 @@ class InfantryLauncher
                                    ///< trigger speed reference limit
   };
 
+  struct HeatParam
+  {
+    float offline_heat_limit = 240.0f;   // 首次有效裁判参数前的热量上限。
+    float offline_cooling_rate = 40.0f;  // 首次有效裁判参数前的冷却速率。
+  };
+
   /**
    * @brief 热量控制状态。
    *        Heat control state.
@@ -188,6 +195,7 @@ class InfantryLauncher
     const char* launcher_ref_topic_name;              ///< 订阅的裁判发射数据 Topic 名称
                                                       ///< Name of the subscribed referee
                                                       ///< launcher data Topic
+    HeatParam heat_param{};
   };
 
   /**
@@ -248,7 +256,9 @@ class InfantryLauncher
                                                .num_trig_tooth = 10},
                             .thread_priority = LibXR::Thread::Priority::HIGH,
                             .launcher_cmd_topic_name = "launcher_cmd",
-                            .launcher_ref_topic_name = "launcher_ref"})
+                            .launcher_ref_topic_name = "launcher_ref",
+                            .heat_param = {.offline_heat_limit = 240.0f,
+                                           .offline_cooling_rate = 40.0f}})
       : motor_fric_0_(&motor_fric_0),
         motor_fric_1_(&motor_fric_1),
         motor_trig_(&motor_trig),
@@ -257,8 +267,13 @@ class InfantryLauncher
         pid_fric_0_(param.pid_param_fric_speed_0),
         pid_fric_1_(param.pid_param_fric_speed_1),
         param_(param.launcher_param),
+        heat_param_(param.heat_param),
         referee_(referee)
   {
+    ASSERT(std::isfinite(heat_param_.offline_heat_limit) &&
+           heat_param_.offline_heat_limit > 0.0f);
+    ASSERT(std::isfinite(heat_param_.offline_cooling_rate) &&
+           heat_param_.offline_cooling_rate >= 0.0f);
     launcher_cmd_topic_name_ = param.launcher_cmd_topic_name;
     launcher_ref_topic_name_ = param.launcher_ref_topic_name;
     thread_.Create(this, ThreadFunc, "LauncherThread", param.task_stack_depth, param.thread_priority);
@@ -329,33 +344,42 @@ class InfantryLauncher
   static void ThreadFunc(InfantryLauncher* self)
   {
     LibXR::Topic::ASyncSubscriber<CMD::LauncherCMD> cmd_sub(self->launcher_cmd_topic_name_);
-    LibXR::Topic::ASyncSubscriber<Referee::LauncherPack> launcher_ref(
-        self->launcher_ref_topic_name_);
+    std::optional<LibXR::Topic::ASyncSubscriber<Referee::LauncherPack>> launcher_ref;
     cmd_sub.StartWaiting();
-    launcher_ref.StartWaiting();
     self->last_online_time_ = LibXR::Timebase::GetMicroseconds();
     while (true)
     {
+      // 裁判 Topic 出现后再订阅，离线启动时不等待。
+      if (!launcher_ref)
+      {
+        auto topic = LibXR::Topic::Find(self->launcher_ref_topic_name_);
+        if (topic != nullptr)
+        {
+          launcher_ref.emplace(LibXR::Topic(topic));
+          launcher_ref->StartWaiting();
+        }
+      }
+
       auto now = LibXR::Timebase::GetMicroseconds();
       self->dt_ = (now - self->last_online_time_).ToSecondf();
       self->last_online_time_ = now;
 
+      self->mutex_.Lock();
       if (cmd_sub.Available())
       {
         self->launcher_cmd_ = cmd_sub.GetData();
         cmd_sub.StartWaiting();
       }
-      if (launcher_ref.Available())
+      if (launcher_ref && launcher_ref->Available())
       {
-        const auto ref_pack = launcher_ref.GetData();
-        self->ref_data_.heat_limit = ref_pack.rs.shooter_heat_limit;
-        self->ref_data_.cooling_rate = ref_pack.rs.shooter_cooling_value;
-        self->ref_data_.current_heat_17 = ref_pack.ph.launcher_id1_17_heat;
+        const auto ref_pack = launcher_ref->GetData();
+        self->UpdateRefereeHeat(ref_pack.rs.shooter_heat_limit,
+                                ref_pack.rs.shooter_cooling_value,
+                                ref_pack.ph.launcher_id1_17_heat);
         self->ref_data_.bullet_speed = ref_pack.ld.bullet_speed;
         self->robot_level_ = ref_pack.rs.robot_level;
-        launcher_ref.StartWaiting();
+        launcher_ref->StartWaiting();
       }
-      self->mutex_.Lock();
       self->Update();
       self->RunStateMachine();
       self->mutex_.Unlock();
@@ -505,6 +529,13 @@ class InfantryLauncher
           calibration_pending_ = false;
           target_shot_index_ = 0;
           is_reverse_ = false;
+          first_shot_start_time_ = 0;
+          first_shot_delay_ms_ = 0;
+          delay_time_ = 0;
+          start_fire_time_ = 0;
+          finish_fire_time_ = 0;
+          real_launch_delay_ = 0;
+          mark_launch_ = true;
         }
         break;
     }
@@ -535,6 +566,13 @@ class InfantryLauncher
     press_continue_ = false;
     calibrated_ = false;
     calibration_pending_ = false;
+    first_shot_start_time_ = 0;
+    first_shot_delay_ms_ = 0;
+    delay_time_ = 0;
+    start_fire_time_ = 0;
+    finish_fire_time_ = 0;
+    real_launch_delay_ = 0;
+    mark_launch_ = true;
     trigger_step_active_ = false;
     target_shot_index_ = 0;
     is_reverse_ = false;
@@ -604,6 +642,7 @@ class InfantryLauncher
   LibXR::PID<float> pid_fric_1_;
 
   LauncherParam param_;
+  HeatParam heat_param_;
   Referee* referee_ = nullptr;
   LibXR::Event launcher_event;
   const char* launcher_cmd_topic_name_ = nullptr;
@@ -624,6 +663,9 @@ class InfantryLauncher
   float target_trig_angle_ = 0.0f;
   float last_motor_angle_ = 0.0f;
   float first_shot_angle_ = 0.0f;
+  uint32_t first_shot_delay_ms_ = 0;  // 首发拨弹到掉速校准成功的耗时（毫秒）。
+  uint32_t delay_time_ = 0;           // 首发校准等待的控制循环次数。
+  uint32_t real_launch_delay_ = 0;    // 常规拨弹到掉速检测出弹的耗时（毫秒）。
   float fric_speed_peak_ = 0.0f;
   float jam_target_angle_ = 0.0f;
   int32_t target_shot_index_ = 0;
@@ -637,6 +679,7 @@ class InfantryLauncher
   bool trigger_step_active_ = false;
   bool calibrated_ = false;
   bool calibration_pending_ = false;
+  bool mark_launch_ = true;  // 常规延迟观测已完成，或尚未开始。
   bool ui_layer_cleared_ = false;
   bool ui_fric_text_initialized_ = false;
   bool ui_fire_mode_text_initialized_ = false;
@@ -646,6 +689,9 @@ class InfantryLauncher
   float shot_progress_ = 0.0f;
 
   LibXR::MillisecondTimestamp fire_press_time_ = 0;
+  LibXR::MillisecondTimestamp first_shot_start_time_ = 0;
+  LibXR::MillisecondTimestamp start_fire_time_ = 0;
+  LibXR::MillisecondTimestamp finish_fire_time_ = 0;
   LibXR::MillisecondTimestamp last_trig_time_ = 0;
   LibXR::MillisecondTimestamp last_jam_time_ = 0;
   LibXR::MillisecondTimestamp last_heat_time_ = 0;
@@ -667,16 +713,43 @@ class InfantryLauncher
   };
   LibXR::Mutex mutex_;
 
-  void UpdateLauncherState()
+  void UpdateRefereeHeat(float heat_limit, float cooling_rate, float current_heat)
   {
-    if (param_trig_.torque > launcher::param::JAM_TORQUE)
+    // 无效数据不覆盖最后有效裁判参数。
+    if (!std::isfinite(heat_limit) || heat_limit <= 0.0f ||
+        !std::isfinite(cooling_rate) || cooling_rate < 0.0f ||
+        !std::isfinite(current_heat) || current_heat < 0.0f)
     {
-      launcher_state_ = LauncherState::JAMMED;
       return;
     }
+    ref_data_.heat_limit = heat_limit;
+    ref_data_.cooling_rate = cooling_rate;
+    ref_data_.current_heat_17 = current_heat;
+  }
+
+  float EffectiveHeatLimit() const
+  {
+    return ref_data_.heat_limit > 0.0f ? ref_data_.heat_limit
+                                       : heat_param_.offline_heat_limit;
+  }
+
+  float EffectiveCoolingRate() const
+  {
+    return ref_data_.heat_limit > 0.0f ? ref_data_.cooling_rate
+                                       : heat_param_.offline_cooling_rate;
+  }
+
+  void UpdateLauncherState()
+  {
+    // 非 READY 时不进入脱卡流程。
     if (launcher_event_ != LauncherEvent::SET_FRICMODE_READY)
     {
       launcher_state_ = LauncherState::RELAX;
+      return;
+    }
+    if (param_trig_.torque > launcher::param::JAM_TORQUE)
+    {
+      launcher_state_ = LauncherState::JAMMED;
       return;
     }
 
@@ -686,7 +759,8 @@ class InfantryLauncher
       return;
     }
 
-    launcher_state_ = launcher_cmd_.isfire ? LauncherState::NORMAL : LauncherState::STOP;
+    // 松开扳机不取消当前拨弹目标。
+    launcher_state_ = LauncherState::NORMAL;
   }
 
   void RunStateMachine()
@@ -716,7 +790,13 @@ class InfantryLauncher
         break;
 
       case LauncherState::NORMAL:
-        if (continue_mode_)
+        if (!launcher_cmd_.isfire)
+        {
+          // 松手后完成当前拨弹。
+          press_continue_ = false;
+          trig_mode_ = TrigMode::SINGLE;
+        }
+        else if (continue_mode_)
         {
           press_continue_ = true;
           trig_mode_ = TrigMode::CONTINUE;
@@ -753,6 +833,13 @@ class InfantryLauncher
     const bool fric_ready = fabsf(param_fric_0_.velocity) >= ready_rpm &&
                             fabsf(param_fric_1_.velocity) >= ready_rpm;
 
+    // 超过 500 ms 未检测到出弹，按新版重新计时。
+    if (!mark_launch_ && start_fire_time_ > 0 &&
+        (now - start_fire_time_).ToMillisecond() > 500)
+    {
+      start_fire_time_ = now;
+    }
+
     auto indexed_target = [&]()
     { return first_shot_angle_ + step * static_cast<float>(target_shot_index_); };
 
@@ -771,16 +858,32 @@ class InfantryLauncher
       last_trig_time_ = now;
     };
 
+    if (calibration_pending_ && !calibrated_)
+    {
+      ++delay_time_;
+    }
+
     if (trigger_step_active_)
     {
       fric_speed_peak_ = std::max(fric_speed_peak_, fric_speed);
 
-      if (calibration_pending_ && !calibrated_ && fric_speed_peak_ >= ready_rpm &&
-          fric_speed_peak_ - fric_speed >= launcher::param::FRIC_DROP_RPM)
+      // 首发校准和常规延迟观测使用相同的掉速判定。
+      const bool SHOT_DETECTED =
+          fric_speed_peak_ >= ready_rpm &&
+          fric_speed_peak_ - fric_speed >= launcher::param::FRIC_DROP_RPM;
+      if (!mark_launch_ && SHOT_DETECTED)
+      {
+        finish_fire_time_ = now;
+        mark_launch_ = true;
+        real_launch_delay_ = (finish_fire_time_ - start_fire_time_).ToMillisecond();
+      }
+
+      if (calibration_pending_ && !calibrated_ && SHOT_DETECTED)
       {
         calibrated_ = true;
         calibration_pending_ = false;
         first_shot_angle_ = trig_angle_;
+        first_shot_delay_ms_ = (now - first_shot_start_time_).ToMillisecond();
         target_trig_angle_ = indexed_target();
         heat_limit_.current_heat =
             std::max(heat_limit_.current_heat, ref_data_.current_heat_17) +
@@ -814,8 +917,7 @@ class InfantryLauncher
       const float current_heat =
           std::max(heat_limit_.current_heat, ref_data_.current_heat_17);
       const float shot_heat = heat_limit_.single_heat * static_cast<float>(shot_count_);
-      if (ref_data_.heat_limit <= 0.0f ||
-          current_heat + shot_heat + heat_limit_.merge > ref_data_.heat_limit)
+      if (current_heat + shot_heat + heat_limit_.merge > EffectiveHeatLimit())
       {
         return;
       }
@@ -824,10 +926,14 @@ class InfantryLauncher
       {
         target_shot_index_ += static_cast<int32_t>(shot_count_);
         target_trig_angle_ = indexed_target();
+        start_fire_time_ = now;
+        mark_launch_ = false;
       }
       else
       {
         calibration_pending_ = true;
+        delay_time_ = 0;
+        first_shot_start_time_ = now;
         target_shot_index_ = static_cast<int32_t>(shot_count_) - 1;
         fric_speed_peak_ = fric_speed;
         target_trig_angle_ = trig_angle_ + step * static_cast<float>(shot_count_);
@@ -852,8 +958,9 @@ class InfantryLauncher
         {
           recover_from_jam();
         }
-        else if (last_trig_mode_ == TrigMode::SAFE || last_trig_mode_ == TrigMode::RELAX)
+        else if (launcher_cmd_.isfire && !last_fire_notify_)
         {
+          // 按下扳机时发起一次拨弹。
           start_shot();
         }
         break;
@@ -867,7 +974,8 @@ class InfantryLauncher
         {
           recover_from_jam();
         }
-        else if (!trigger_step_active_ && since_last >= interval_s)
+        else if (launcher_cmd_.isfire && !trigger_step_active_ &&
+                 since_last >= interval_s)
         {
           start_shot();
         }
@@ -951,10 +1059,11 @@ class InfantryLauncher
     }
     last_heat_time_ = now;
 
+    const float MAX_HEAT = EffectiveHeatLimit();
+    const float cooling_rate = EffectiveCoolingRate();
     float current_heat = std::max(heat_limit_.current_heat, ref_data_.current_heat_17);
-    float residuary_heat = ref_data_.heat_limit - current_heat - heat_limit_.merge;
-    heat_limit_.allow_fire =
-        ref_data_.heat_limit > 0.0f && residuary_heat >= heat_limit_.single_heat;
+    float residuary_heat = MAX_HEAT - current_heat - heat_limit_.merge;
+    heat_limit_.allow_fire = residuary_heat >= heat_limit_.single_heat;
 
     if (!heat_limit_.allow_fire)
     {
@@ -964,7 +1073,7 @@ class InfantryLauncher
 
     if (residuary_heat <= heat_limit_.single_heat * heat_limit_.heat_threshold)
     {
-      float safe_freq = ref_data_.cooling_rate / heat_limit_.single_heat;
+      float safe_freq = cooling_rate / heat_limit_.single_heat;
       float ratio =
           residuary_heat / (heat_limit_.single_heat * heat_limit_.heat_threshold);
       trig_freq_ = ratio * (expect_trig_freq_ - safe_freq) + safe_freq;
@@ -991,7 +1100,7 @@ class InfantryLauncher
 
     if (delta_time > 0.0f)
     {
-      heat_limit_.current_heat -= ref_data_.cooling_rate * delta_time;
+      heat_limit_.current_heat -= EffectiveCoolingRate() * delta_time;
     }
     if (heat_limit_.current_heat <= 0.0f)
     {
